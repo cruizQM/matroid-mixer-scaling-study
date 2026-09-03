@@ -1,0 +1,5 @@
+numpy>=1.24
+networkx>=3.0
+qiskit>=1.0
+matplotlib>=3.7
+pandapower>=2.14  # for scripts/real_feeders.py -- loads the published IEEE 33-bus test feeder

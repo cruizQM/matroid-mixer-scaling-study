@@ -1,0 +1,6 @@
+n_nodes,n_seeds,naive_max_cycle_length_mean,naive_max_cycle_length_median,naive_max_cycle_length_max,decomposed_max_witness_size_mean,decomposed_max_witness_size_median,decomposed_max_witness_size_max,max_pattern_count_mean,max_pattern_count_median,max_pattern_count_max,total_controlled_gates_mean,total_controlled_gates_median,total_controlled_gates_max,max_cx_opt1_mean,max_cx_opt1_median,max_cx_opt1_max,max_cx_opt3_mean,max_cx_opt3_median,max_cx_opt3_max,all_leak_free,all_connected
+10,12,11.7,12.0,14,1.3,0.0,4,4,1.0,11,11.8,4.0,48,512.8,16.0,2404,485.8,8.0,2280,True,False
+20,12,18.2,18.0,24,3.5,4.0,4,5.4,4.5,9,37,24.0,99,4952.8,3833.0,11790,4857.7,3796.5,11522,True,True
+40,12,27.5,28.0,32,2.7,2.0,4,2.4,2.0,7,15.8,12.5,31,1597,804.0,4450,1539.7,735.5,4414,True,True
+80,12,44.1,45.0,60,2.7,3.0,4,2.3,2.0,5,20.2,19.5,33,2056.7,1605.0,4932,2011.1,1525.0,4889,True,False
+120,12,58.2,58.5,69,2.6,2.0,4,2.3,2.0,6,21.4,18.5,38,1514.5,744.0,5464,1464.2,657.0,5403,True,False

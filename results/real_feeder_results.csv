@@ -1,0 +1,2 @@
+source,n_nodes,k_ties,n_qubits,num_spanning_trees,term_count,max_witness_size,dropped_candidates,fully_connected,no_leakage_verified,cx_count,total_gate_count,depth
+IEEE33_baran_wu_1989_pandapower_case33bw,33,5,37,50751,24,0,573,False,True,96,417,78
