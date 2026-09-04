@@ -179,6 +179,16 @@ and stays small. `leakage_trace.py` traces the actual probability mass
 this costs on real trajectories (exactly, not sampled), separately from
 the abstract leakage rate the search itself optimizes.
 
+![Bounded-witness mixer concept: capping witness size trades cost for a measured, non-zero leakage rate](results/illustration_bounded_witness.png)
+
+*(concept diagram, not a measurement — a hand-constructed 3-qubit example
+chosen to show one clean mismatch, not a real exchange from any graph
+elsewhere in this repo)* the exact witness (all 3 qubits) is never wrong;
+capping to 1 qubit and taking a majority vote gets the `a=0` group right
+unanimously, but state `100` leaks under the `a=1` group's 3-of-4
+majority. This is exactly what `cost_alpha` (technique 4) trades against:
+a wider witness reduces leakage like this but costs more circuit.
+
 **4. Cost-aware search (`cost_alpha`) — fixes a real 38x inefficiency.**
 The first version of (3) picked witnesses by leakage alone, and since
 adding a witness qubit can only ever weakly *reduce* leakage, the search
@@ -208,8 +218,11 @@ turns out to have much higher seed-to-seed variance than whole-graph cost
 one big averaging problem for many small independent ones, and a single
 "unlucky" zone can dominate a seed's total). The fix: build each
 subproblem, transpile it, check its **actual** cost against a threshold,
-and recursively re-split anything over it — measure, don't guess. Gets
-**every seed of the synthetic ladder under 500 CX**, and comes within
+and recursively re-split anything over it — measure, don't guess.
+
+![Cost-capped decomposition: measure actual cost, recurse only where it's over threshold](results/illustration_cost_capped_decomposition.png)
+
+Gets **every seed of the synthetic ladder under 500 CX**, and comes within
 1.6% of that target on real data (`docs/scaling-ladder-and-decomposition.md` §11).
 
 ## Why the ladder is shaped this way, and why log growth
@@ -269,7 +282,9 @@ a property of the flat-tie-count assumption specifically, not the
 construction in general: under log-scaled tie-count growth (the
 realistic model, per above), the exact construction's cost instead
 **increases** — 3.4x more on average, 5.8x more at the 33-node
-calibration point (`docs/scaling-ladder-and-decomposition.md` §1).
+calibration point (`docs/scaling-ladder-and-decomposition.md` §1):
+
+![Same exact construction, two tie-count growth assumptions -- cost trend inverts](results/fixed_vs_log_tiecount_plot.png)
 
 **Real topology (IEEE 33-bus feeder).** Built the same way, directly on
 the real, published feeder (Baran & Wu 1989, `n_nodes=33`, `n_qubits=37`,
@@ -291,10 +306,11 @@ reproducing the real failure mode at controllable sizes (12 seeds/size,
 
 The whole-graph requirement grows roughly linearly; the decomposed
 requirement (fixed zone size) stays flat around 3 — the central claim of
-the decomposition fix. Re-plotted by qubit count for direct comparison
-against the synthetic baseline above:
-
-![Whole-graph vs. zone-decomposed witness requirement, by qubit count](results/decomposition_scaling_by_qubits_plot.png)
+the decomposition fix. (Re-plotted by qubit count for direct comparison
+against the synthetic baseline above: `results/decomposition_scaling_by_qubits_plot.png`
+— within headline result 1's own tested range, the two hadn't even
+visibly diverged yet; the real point of that sweep is what happens past
+where headline result 1 stopped.)
 
 **On a second real network (CIGRE MV, 15 buses, 3 ties)**: exact
 whole-graph construction succeeds here (small enough graph), at 16 terms,
@@ -328,7 +344,11 @@ cost roughly plateaus by `n_nodes=60` rather than growing further; tie
 *placement* (short vs. long range) drives the cost level far more than
 tie-count *growth rate* (log vs. linear) does; the mixer stays fully
 connected at every point tested
-(`docs/scaling-ladder-and-decomposition.md` §2). Getting here also
+(`docs/scaling-ladder-and-decomposition.md` §2):
+
+![Cost-aware bounded-witness mixer, escalating realism ladder](results/ladder_cx_plot.png)
+
+Getting here also
 surfaced a real bug — a search objective that can let most of a mixer's
 terms silently stop firing at all, producing a circuit that *looks* safe
 because it has stopped being a mixer — caught by tracking active vs.
@@ -343,15 +363,21 @@ whole-graph cost-aware construction, winning every single seed at every
 size ≥ 30 nodes, for both log-growth conditions (§6). Hierarchical
 decomposition (technique 5) pushes the hardest remaining condition
 further: 1.46-1.59x cheaper than flat decomposition at real scale (§8).
+**Cost-capped decomposition (technique 6) closes the rest of the way to
+the target.** The three stages together, on the ladder's two default
+conditions:
 
-**Cost-capped decomposition (technique 6) is the current recommendation**
-— it doesn't just do well on average, it guarantees the target:
+![The three-stage fix: whole-graph -> flat decomposition -> cost-capped decomposition](results/construction_progression_plot.png)
+
+It doesn't just do well on average, it guarantees the target:
 
 | condition | result |
 |---|---|
 | synthetic ladder, both log-growth conditions, all 5 sizes, all seeds | **100% under 500 CX**, mean feasible mass exactly 1.0 |
 
 **Validated directly on real networks — not just synthetic proxies:**
+
+![Real networks: exact vs. decomposed vs. cost-capped construction](results/real_network_comparison_plot.png)
 
 | network | construction | CX | result |
 |---|---|---|---|
@@ -361,6 +387,10 @@ further: 1.46-1.59x cheaper than flat decomposition at real scale (§8).
 | IEEE33 (33 buses, 5 ties) | exact whole-graph | 96 | **573/597 candidates dropped, disconnected — fails** |
 | IEEE33 | decomposed | 132 | fully functional; mean feasible mass 1.0 |
 | IEEE33 | **cost-capped decomposed** | **508** | 8 CX over target (1.6%); mean feasible mass 1.0 (perfect) |
+
+And directly against NISQ feasibility, all six numbers together:
+
+![Where each construction lands relative to NISQ feasibility](results/nisq_feasibility_plot.png)
 
 IEEE33's small miss is not a mystery or a search failure: it's traced to
 one small (4-node), genuinely irreducible dense multigraph core, where
@@ -432,6 +462,7 @@ python scripts/run_best_of_both_ladder.py               # confirms decomposition
 python scripts/run_hierarchical_decomposed_ladder.py    # density-aware recursive decomposition, for the still-hard conditions
 python scripts/run_real_networks_hierarchical.py        # this branch's actual construction, run directly on CIGRE MV + IEEE33
 python scripts/run_cost_capped_decomposition.py         # decomposition that MEASURES cost and re-splits over-threshold subproblems
+python scripts/plot_results_figures.py                  # re-plots the README's result figures from already-committed CSVs (no re-measurement)
 ```
 
 All scripts are deterministic (fixed random seeds); re-running should
@@ -495,7 +526,10 @@ boundary of what was measured.
   qubit count instead of node count, for direct comparison against
   headline result 1 (reads the existing CSV, no re-measurement).
   `plot_illustrations.py` generates the explanatory diagrams (not
-  measurements). Bounded-witness mixer: `random_trees.py` (Wilson's
+  measurements) -- including `plot_bounded_witness_concept()` and
+  `plot_cost_capped_decomposition_concept()`, added alongside this
+  README's restructuring to illustrate techniques 3 and 6 directly, since
+  neither previously had a diagram of its own. Bounded-witness mixer: `random_trees.py` (Wilson's
   algorithm + exchange-graph-walk sampling), `truncated_mixer.py`
   (bounded-witness construction, including the cost-aware search --
   `cost_alpha` -- described below), `leakage_trace.py` (exact + sparse
@@ -530,6 +564,11 @@ boundary of what was measured.
   each subproblem's actual CX cost and recursively re-splits anything over
   a threshold, rather than picking a zone size and hoping -- 100% success
   on the synthetic ladder, tested on both real networks too) round it out.
+  `plot_results_figures.py` generates this README's five result figures
+  (`fixed_vs_log_tiecount_plot.png`, `ladder_cx_plot.png`,
+  `construction_progression_plot.png`, `nisq_feasibility_plot.png`,
+  `real_network_comparison_plot.png`) directly from already-committed
+  CSVs -- no re-measurement, same discipline as `plot_decomposition_by_qubits.py`.
 - `results/` — one CSV/plot pair per script above, all generated, none
   hand-edited; `*_before_minimization.*` files are the pre-fix numbers,
   kept for the before/after comparison in `docs/circuit-validity.md`;
@@ -538,7 +577,9 @@ boundary of what was measured.
   and `illustration_fundamental_cycle.png` share the exact same 14-node
   running example graph; `illustration_decomposition.png` uses a larger
   instance from the same random seed, needed for partitioning to be
-  illustrative at all).
+  illustrative at all; `illustration_bounded_witness.png` and
+  `illustration_cost_capped_decomposition.png` are concept diagrams for
+  techniques 3 and 6, not derived from any specific measured instance).
 
 ## License
 
