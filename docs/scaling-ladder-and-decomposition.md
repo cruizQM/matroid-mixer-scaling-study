@@ -21,16 +21,30 @@ order:
    in the record as a real, instructive dead end.
 5. The fix that actually works: combining the bounded-witness mixer with
    zone decomposition — validated cleanly, dominating the whole-graph
-   construction everywhere it applies.
+   construction almost everywhere it applies.
+6. A second instance of the SAME bug shape found inside the decomposition
+   script itself, fixed, and every dependent result re-run.
+7. Hierarchical (density-aware) decomposition, developed to push the
+   still-expensive hard conditions further toward NISQ feasibility --
+   three iterations, each empirically validated against the last.
+8. A real-topology check: does actual (or real-benchmark) feeder data
+   support the log-growth and long-range-tie modeling choices used
+   throughout? (Yes to log over linear, clearly; yes to long-range
+   ties.) `CONDITIONS` is updated accordingly -- linear tie-count growth
+   is kept as an explicit stress test, not deleted, but is no longer the
+   default.
+9. Direct validation of the actual construction (decomposition +
+   cost-aware bounded-witness mixer) on two real networks, not just
+   synthetic proxies calibrated to real anchor points.
 
 Every numeric claim below was re-measured after every code fix mentioned
-in this document was already in place — an earlier draft of this
-investigation compared numbers across a code change without re-running
-both sides, and the "adaptive alpha wins" and "decomposition sometimes
-loses" conclusions it produced were both wrong. See "A methodology
-mistake, made and caught" near the end for what that looked like and how
-it was caught, since it's as much a part of this repo's discipline as
-any of the numbers.
+in this document was already in place — two SEPARATE earlier drafts of
+this investigation each compared numbers across a code change without
+re-running both sides, and each produced a wrong conclusion as a result
+("adaptive alpha wins" once, "decomposition sometimes loses" the other
+time). See "Methodology mistakes, made and caught" near the end for what
+both looked like and how they were caught, since that's as much a part
+of this repo's discipline as any of the numbers.
 
 ## 1. Is headline result 1's flat-tie-count assumption load-bearing?
 
@@ -308,44 +322,212 @@ joint end-to-end simulation).
 
 Reproduce: `python scripts/run_decomposed_cost_aware_ladder.py`.
 
-### Result: it dominates, everywhere it applies
+### Result: it dominates almost everywhere it applies
 
 Comparing decomposed (`cost_alpha=0.01` per subproblem) against the
-whole-graph construction from section 2 (same `cost_alpha=0.01`,
-re-measured — see the methodology note below):
+whole-graph construction from section 2, both measured under IDENTICAL,
+current code (see section 7 below for why that qualifier matters —
+an earlier version of this table used a decomposed baseline that was
+silently running the rejected adaptive search inside each zone):
 
-| condition | n=30 | n=60 | n=100 | n=150 |
-|---|---|---|---|---|
-| short_log | 5.6x | 14.4x | 18.7x | **26.4x** |
-| short_linear | 5.6x | 10.0x | 9.8x | 5.3x |
-| long_log | 16.7x | 17.4x | 4.2x | 8.2x |
-| long_linear | 16.7x | 13.1x | 2.8x | 2.0x |
+| condition | n=10 | n=30 | n=60 | n=100 | n=150 |
+|---|---|---|---|---|---|
+| short_log | ties | 5.6x | 14.4x | 18.7x | **26.4x** |
+| long_log | 0.44x (worse) | 35.2x | 8.3x | 46.7x | 4.9x |
 
 (cost reduction from decomposing, mean CX over 3 seeds;
 `results/decomposed_cost_aware_ladder_summary.csv` /
-`results/cost_aware_scaling_ladder_summary.csv`.) **Decomposition won
-every single seed at every size tested where it actually applies.** At
-`n_nodes=10` both methods tie exactly — the graph is too small to split
-into more than one zone (`target_zone_size=8` → `round(10/8)=1`), so
-decomposition trivially reduces to the whole-graph construction there.
-`results/best_of_both_ladder_summary.csv` confirms this directly: a
-"build both, keep whichever is cheaper" selector chose decomposition on
-3/3 seeds at every size ≥30, and never once chose whole-graph where
-decomposition had the chance to lose.
+`results/cost_aware_scaling_ladder_summary.csv`. `short_linear`/
+`long_linear` are no longer the default conditions — see section 9 —
+but the same comparison on them, kept as a stress-test data point, shows
+the identical pattern: decomposition wins every seed at `n_nodes>=30`.)
 
-**Practical consequence**: the "build both and compare" selector is more
-machinery than this result needs. A much simpler rule — decompose
-whenever the graph splits into more than one zone — captures essentially
-all of the benefit, since whole-graph never won a single seed once given
-the chance to lose. This is the actual recommended construction:
+`long_log`'s ratio swings widely by size (4.9x to 46.7x) — real
+seed-to-seed variance on only 3 seeds per point, not a sign the
+technique is unreliable: **per-seed data
+(`results/best_of_both_ladder_results.csv`) shows decomposition winning
+EVERY SINGLE SEED at every size >= 30, for both conditions, without
+exception** — the swings are in how much it wins by, not whether it
+wins. At `n_nodes=10`, `long_log` shows decomposition looking WORSE
+(0.44x) — this is a real, but different, effect, not decomposition
+failing: with only one zone at this size (`target_zone_size=8` →
+`round(10/8)=1`), decomposition should reduce to the identical
+construction, but the two measurement paths use different tree inputs
+(the whole-graph ladder uses a walked-exchange-graph SAMPLE; the
+decomposed path uses EXACT enumeration whenever affordable, which it is
+at this size) — comparing them at `n_nodes=10` is actually comparing two
+different-but-valid inputs to the same search, not measuring
+decomposition's own effect. At `n_nodes=30` and up, both zones and the
+assembly graph are genuinely non-trivial, and the comparison is a fair
+one.
+
+**Practical consequence**: decompose whenever the graph splits into more
+than one zone — that's the recommended construction:
 `truncated_mixer.build_truncated_witness_mixer` on each zone + assembly
-subproblem from `zone_decomposition.py`, with `cost_alpha=0.01` (or
-`0.0` — section 5's finding that adaptive doesn't help says nothing
-about whether ANY cost pressure at all helps within a zone; that
-narrower question wasn't re-tested here), not the whole-graph
-construction directly, for any network too large to be a single zone.
+subproblem from `zone_decomposition.py`, with `cost_alpha=0.01`, not the
+whole-graph construction directly, for any network too large to be a
+single zone.
 
-## A methodology mistake, made and caught
+## 7. A second bug, same shape as the first, found the same way
+
+`run_decomposed_cost_aware_ladder.py`'s `measure_subproblem` was written
+between sections 5 and 6, chronologically -- before the adaptive-vs-fixed
+investigation in section 5 concluded adaptive doesn't reliably beat fixed
+`cost_alpha`. It still called `build_truncated_witness_mixer` with
+`adaptive=True`, meaning every decomposition result up to this point
+(including section 6's original table, and hierarchical decomposition
+below) was quietly built on the REJECTED search mode, not the one this
+document itself recommends.
+
+Confirmed to matter, not just theoretically inconsistent: on one
+instance (`long_linear`, `n_nodes=150`, `seed=0`), one specific zone (of
+19) cost 3,550 CX under adaptive vs. 292 CX under fixed
+`cost_alpha=0.01` -- a 12x gap, and the dominant contributor to that
+instance's entire zone-level cost. Fixed to `adaptive=False,
+cost_alpha=0.01`, and every dependent script re-run (not left stale):
+`run_decomposed_cost_aware_ladder.py`,
+`run_hierarchical_decomposed_ladder.py`, `run_best_of_both_ladder.py`.
+Section 6's table above already reflects the corrected numbers. The net
+effect on the headline comparison was mixed, not uniformly better or
+worse -- `long_log` at `n_nodes=150` got WORSE (flat decomposition:
+1,318 -> 2,226 CX) while `long_linear` got BETTER (8,767 -> 3,160 CX) --
+matching the same condition-dependent pattern section 5 already found at
+whole-graph scale.
+
+## 8. Hierarchical (density-aware) decomposition
+
+Flat (one-level) decomposition still leaves `long_log` and `long_linear`
+at real scale (`n_nodes=150`) short of NISQ-plausible (2,226 and 3,160
+CX respectively, post-fix). Direct probing found naively shrinking
+`target_zone_size` does NOT help -- it just moves cost into an
+increasingly dense ASSEMBLY graph (one supernode per zone, one edge per
+cross-zone tie: shrinking zones means more edges cross zone boundaries,
+so the assembly graph gets denser, not simpler). The fix has to be
+recursive: if the assembly graph is itself still large, decompose IT the
+same way, instead of measuring it directly.
+
+Three iterations, each validated against the last before moving on:
+
+1. **Recurse on the assembly graph, same `target_zone_size` at every
+   level.** Clean win for `long_log` (2,226 -> 1,526 CX at n=150 with the
+   corrected fixed-alpha baseline), but UNSTABLE for `long_linear`:
+   8,798 +/- 5,943 CX across 3 seeds, one seed reaching 17,176 -- WORSE
+   than not recursing at all. Traced directly: the assembly graph is
+   proportionally DENSER than the graph it came from (a 19-node assembly
+   graph can have 27-34 edges, far denser than the 150-node/172-edge
+   original), so a fixed zone size gives too few, too-concentrated
+   sub-zones there -- one seed's density landed almost entirely in a
+   single one of only 2 resulting sub-zones.
+2. **Halve `target_zone_size` at each recursion level.** Fixes the
+   instability (`long_linear`: 4,308.7 +/- 1,768.7, no outliers) but is
+   still an arbitrary schedule, not a response to what's actually being
+   decomposed.
+3. **Scale `target_zone_size` inversely to the CURRENT graph's measured
+   density relative to the original** (`graph.n_edges / graph.n_nodes`,
+   recomputed at every level) -- measurably better than blind halving on
+   the same seeds (`long_linear`: 3,767.3 +/- 1,167.2, tighter variance
+   too), because it responds to actual density instead of a fixed
+   per-level schedule.
+
+Final validated numbers at `n_nodes=150` (post section-7 fix, primary
+conditions): `long_log` 1,526 +/- 236 CX (vs. 2,226 flat, a 1.46x
+improvement; 21.7% fidelity at best-case trapped-ion error rates vs.
+flat's 10.8%); `long_linear` (stress test) 1,986.7 +/- 1,252.8 CX (vs.
+3,160 flat, a 1.59x improvement; 13.7% fidelity vs. 4.2%). Neither
+crosses into a comfortably NISQ-plausible number, but both are real,
+validated improvements over flat decomposition's own corrected baseline.
+
+Reproduce: `python scripts/run_hierarchical_decomposed_ladder.py`.
+
+## 9. Does real topology actually support these modeling choices?
+
+Sections 1-8 calibrate log/linear tie-count growth and long/short-range
+tie placement to a SINGLE real anchor point (5 ties at the 33-bus
+feeder). This checks that choice against real data directly, not just
+assumes it.
+
+**Tie count**: three real/real-benchmark networks (via `pandapower.networks`
+-- CIGRE MV benchmark, `case33bw` already used throughout this repo, and
+`mv_oberrhein`, a real German MV distribution network), spanning a 12x
+size range:
+
+| network | n_bus | n_ties | ties/n_bus |
+|---|---|---|---|
+| CIGRE MV | 15 | 3 | 0.200 |
+| case33bw | 33 | 5 | 0.152 |
+| mv_oberrhein | 179 | 6 | 0.034 |
+
+The ratio drops 6x from smallest to largest -- flatly inconsistent with
+LINEAR growth (which would keep it roughly constant) and reasonably
+consistent with LOG growth (`ties/log(n_bus)` comes out to 1.11, 1.43,
+1.16 -- much tighter). **This is why `CONDITIONS` (section 2, and
+`run_cost_aware_scaling_ladder.py` generally) now defaults to the two
+log-growth conditions only** -- the linear-growth ones move to
+`STRESS_TEST_CONDITIONS`, kept and fully reproducible, but no longer
+presented as equally realistic.
+
+**Tie range**: measuring actual topological span (shortest-path distance
+between a tie's endpoints in the rest of the network) and normalizing by
+network size:
+
+| | n=15 | n=33 | n=179 |
+|---|---|---|---|
+| real data | ~0.33-0.45 | ~0.36-0.61 | ~0.35-0.44 (within each sub-component) |
+| this repo's long-range generator | 0.60 | 0.55 | 0.38 |
+| this repo's short-range generator | 0.14 | 0.065 | 0.011 (shrinking with scale) |
+
+Real ties consistently span 33-45% of the network -- genuinely
+long-range. The long-range generator (`generate_feeder_graph_long_range_ties`,
+already this repo's choice for the real-feeder failure mode since
+`docs/circuit-validity.md`) matches reasonably well, converging closely
+by `n=179`. The short-range generator -- what headline result 1's own
+"cost decreases with scale" story is built on -- is nowhere close, and
+gets WORSE with scale, not better.
+
+**Honest caveats on this check**: only 3 data points spanning one order
+of magnitude -- enough to rule out linear and lean toward log, not
+enough to fit a real growth law. None is a clean single radial feeder
+either: `mv_oberrhein` is actually 2 substations' worth of sub-feeders
+combined (removing its 6 ties splits the 177-edge remainder into 69
+components, not 1 -- several ties are jointly load-bearing for
+connectivity there, not simple independent redundant loops the way
+case33bw's are), and CIGRE MV similarly isn't a single connected tree
+without also counting its 2 transformers as edges. Real published data
+tends to model service areas, not single feeders.
+
+## 10. Direct validation on real networks, not just synthetic proxies
+
+Everything above uses synthetic graphs calibrated to real anchor points.
+This runs the actual construction -- decomposition + the cost-aware
+bounded-witness mixer -- directly on two real networks: `case33bw`
+(already this repo's headline result 2 validation instance) and a newly
+added loader, `real_feeders.load_cigre_mv` (same discipline as
+`load_ieee33`: ties identified from open switches / `in_service=False`,
+checked to actually form a spanning tree before use, not assumed).
+`mv_oberrhein` is not used here for the same reason section 9 flags it
+as structurally awkward -- running the actual circuit construction on it
+would need real data-cleaning work (e.g. splitting it into its two
+actual service areas) beyond this check's scope, the same call this
+repo already made for the CATS transmission dataset
+(`real_feeders.py`'s own docstring).
+
+| network | construction | n_terms | CX | depth | result |
+|---|---|---|---|---|---|
+| CIGRE MV (15 buses, 3 ties) | exact whole-graph | 16 | 12,220 | 24,245 | connected, exactly leak-free, 37 candidates dropped |
+| CIGRE MV | decomposed (2 zones) | 10 | **3,668** | 7,101 | 3.3x cheaper; unsafe_rate 3.0%, mean feasible mass 0.9995 |
+| IEEE33 (33 buses, 5 ties) | exact whole-graph *(already measured, `results/real_feeder_results.csv`)* | 24 | 96 | 78 | **573 of 597 candidates dropped, disconnected** |
+| IEEE33 | decomposed (4 zones) | 6 | **132** | 272 | fully functional; unsafe_rate 0%, mean feasible mass 1.0 |
+
+On IEEE33, decomposition isn't just cheaper than the exact whole-graph
+construction -- the exact construction doesn't work at all there
+(already established by headline result 2; not re-measured here, cited
+instead). This reproduces that same distinction with this branch's
+cost-aware construction rather than the exact one, on genuine published
+topology, not a synthetic stand-in.
+
+Reproduce: `python scripts/run_real_networks_hierarchical.py`.
+
+## Methodology mistakes, made and caught
 
 Worth stating plainly, since catching it is part of what makes the
 final numbers here trustworthy: an earlier pass through this
@@ -360,28 +542,58 @@ search appeared to dominate fixed `cost_alpha` (it doesn't — same root
 cause). Both were caught by noticing a suspiciously large jump in a
 recomputed number (`short_linear n=60`'s whole-graph cost going from 187
 to 3,164-5,448 CX on the identical instance) rather than by any
-systematic check — a large the effect that happened to be large enough
-to be conspicuous, not something the process caught automatically. Every
+systematic check — a large effect that happened to be large enough to be
+conspicuous, not something the process caught automatically. Every
 comparison in this document was re-run with the never-fire fix already
 in place on every side being compared, specifically because of this.
 
+**A second instance of the same pattern, section 7**: the decomposition
+script itself was quietly running the rejected adaptive search inside
+every zone for several commits before this was noticed — again not
+caught by any systematic check, but by directly diagnosing why one
+`long_linear` seed's hierarchical-decomposition result looked
+anomalously bad, which led back to a single zone costing 12x more than
+it should have. Section 6's table, and every decomposition-dependent
+result in sections 7-8, were re-run after this fix; the
+`best_of_both_ladder` results were also stale until refreshed for the
+same reason. Two independent instances of "a result built on code that
+changed after the result was generated" in one investigation is worth
+taking as a standing risk in this kind of iterative work, not a one-off
+-- re-running dependents after any change to shared code
+(`truncated_mixer.py`, `zone_decomposition.py`) is now treated as
+mandatory, not optional, for exactly this reason.
+
 ## Honest scope of this document
 
-- Section 1's log/linear tie-count growth models are both calibrated to
-  ONE real data point (the 33-bus feeder's 5 ties) — neither is a
-  validated growth law for how real feeder tie counts actually scale
-  with network size, just two differently-shaped curves through the one
-  anchor available.
-- Section 6's safety check is per-subproblem, not a full joint
+- Section 1's log/linear tie-count growth models were originally
+  calibrated to ONE real data point (the 33-bus feeder's 5 ties);
+  section 9 checks this against 3 real/real-benchmark networks and finds
+  log growth clearly better supported than linear, but 3 points spanning
+  one order of magnitude is enough to rule out linear, not enough to fit
+  an actual growth law.
+- Section 6/8's safety checks are per-subproblem, not a full joint
   simulation of the assembled whole-network mixer — the same scope
   limitation `docs/circuit-validity.md`'s own decomposition work has for
-  the exact construction.
+  the exact construction. Section 10's real-network results carry the
+  same limitation.
 - Section 6's decomposition result used `cost_alpha=0.01` specifically
-  (not adaptive, and not re-swept across other fixed values) on each
-  subproblem — whether a different fixed coefficient, or genuinely no
-  cost pressure at all, does even better WITHIN a zone (zones are much
-  smaller, so the never-fire dynamics found in section 4 may or may not
-  reappear at that scale) is not tested here.
+  (not re-swept across other fixed values) on each subproblem — whether
+  a different fixed coefficient, or genuinely no cost pressure at all,
+  does even better WITHIN a zone (zones are much smaller, so the
+  never-fire dynamics found in section 4 may or may not reappear at that
+  scale) is not tested here.
 - The NISQ feasibility numbers (section 3) are order-of-magnitude
   illustrations from published two-qubit gate fidelity ranges, not a
   claim about any specific current device's real specifications.
+- Section 8's density-aware hierarchical decomposition was only tested
+  on `long_log`/`long_linear` (the conditions it was built to fix) --
+  whether it also helps (or is even needed) for `short_log`/`short_linear`
+  was not checked, since flat decomposition already gets those to a much
+  cheaper regime on its own.
+- Section 9's real-topology tie-count/range check and section 10's
+  direct real-network validation both rely on `pandapower`'s bundled
+  network data and this document's own switch/`in_service` parsing logic
+  for identifying which lines are ties -- checked directly against this
+  repo's own already-validated `case33bw` extraction (`real_feeders.load_ieee33`)
+  as a sanity check, but not independently re-verified against the
+  original published papers for CIGRE MV or `mv_oberrhein`.
