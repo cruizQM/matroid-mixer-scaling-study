@@ -56,6 +56,7 @@ from leakage_trace import final_feasible_mass
 from random_trees import random_spanning_tree
 from real_feeders import load_cigre_mv, load_ieee33
 from run_decomposed_cost_aware_ladder import measure_subproblem
+from run_cost_capped_decomposition import decompose_to_threshold, CX_THRESHOLD
 from zone_decomposition import build_assembly_graph, build_zone_subgraph, partition_zones_by_size
 
 RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
@@ -139,6 +140,32 @@ def measure_decomposed(graph, seed: int = 0) -> dict:
     }
 
 
+def measure_cost_capped(graph, seed: int = 0) -> dict:
+    """Wraps `run_cost_capped_decomposition.decompose_to_threshold`
+    (developed and validated on the synthetic ladder, where every seed at
+    every size met `CX_THRESHOLD=500`) -- this is the first time it's run
+    on real topology rather than a synthetic proxy."""
+    result = decompose_to_threshold(graph, seed)
+    unsafe = sum(1 for m in result["masses"] if m < 1.0 - 1e-6)
+    return {
+        "method": "cost_capped",
+        "n_terms": None,
+        "max_witness_size": None,
+        "dropped_candidates": 0,
+        "fully_connected": None,
+        "leak_free_verified": None,
+        "cx_count": result["cx"],
+        "depth": result["depth"],
+        "n_zones": None,
+        "assembly_n_nodes": None,
+        "unsafe_rate": round(unsafe / len(result["masses"]), 4) if result["masses"] else 0.0,
+        "mean_feasible_mass": round(float(np.mean(result["masses"])), 4) if result["masses"] else 1.0,
+        "n_leaves": result["n_leaves"],
+        "max_leaf_cx": result["max_leaf_cx"],
+        "met_threshold": result["all_leaves_met_threshold"],
+    }
+
+
 def run(name: str, graph, run_exact: bool = True) -> list:
     print(f"=== {name}: n_nodes={graph.n_nodes} n_qubits={graph.n_edges} k_ties={graph.k_ties} ===", flush=True)
     rows = []
@@ -164,6 +191,11 @@ def run(name: str, graph, run_exact: bool = True) -> list:
     decomp["network"] = name
     rows.append(decomp)
     print(f"  decomposed: {decomp}", flush=True)
+
+    capped = measure_cost_capped(graph)
+    capped["network"] = name
+    rows.append(capped)
+    print(f"  cost_capped: {capped}", flush=True)
     return rows
 
 
@@ -175,7 +207,8 @@ def main() -> None:
 
     fieldnames = ["network", "method", "n_terms", "max_witness_size", "dropped_candidates",
                   "fully_connected", "leak_free_verified", "cx_count", "depth",
-                  "n_zones", "assembly_n_nodes", "unsafe_rate", "mean_feasible_mass"]
+                  "n_zones", "assembly_n_nodes", "unsafe_rate", "mean_feasible_mass",
+                  "n_leaves", "max_leaf_cx", "met_threshold"]
     with open(CSV_PATH, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
