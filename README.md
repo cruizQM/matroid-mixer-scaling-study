@@ -116,6 +116,9 @@ python scripts/run_zone_decomposition_validation.py     # zone-decomposition fix
 python scripts/run_decomposition_scaling_study.py       # does the fix hold as network size grows? (synthetic)
 python scripts/plot_decomposition_by_qubits.py          # re-plots the above by qubit count, not node count
 python scripts/plot_illustrations.py                    # explanatory diagrams (not measurements)
+python scripts/verify_leakage_trace.py                  # correctness check for the bounded-witness mixer's tooling
+python scripts/tie_density_sweep.py                     # a second witness-blowup axis: tie density (see docs/bounded-witness-mixer.md)
+python scripts/run_bounded_witness_safety_survey.py     # real-scale safety survey for the bounded-witness mixer
 ```
 
 All scripts are deterministic (fixed random seeds); re-running should
@@ -265,6 +268,21 @@ standalone technical reference (matroid theory, exact circuit derivation,
 verification arguments) if you want the mechanism independent of the
 narrative.
 
+## Headline result 3: a second witness-blowup axis, and a bounded alternative to decomposition
+
+Headline result 2 traced the whole-graph witness bound's failure on real
+data to tie *range*, and fixed it with zone decomposition. Two more
+pieces, developed on a downstream project and ported back onto this
+branch: a **second, independent axis** — tie *density* alone, on this
+repo's own short-range nearest-tie graph family, unchanged in every other
+respect — also breaks the same bound; and an **alternative to
+decomposition** for cases where a bounded witness is preferred to
+splitting the problem into zones — `truncated_mixer.py` accepts a
+fixed-size witness cap and the resulting (measured, not assumed) leakage,
+instead of dropping a candidate exchange outright. Full account, numbers,
+and the real correctness bug this second construction's cross-checking
+caught in code the previous headline results already depended on: `docs/bounded-witness-mixer.md`.
+
 ## What this does and doesn't demonstrate
 
 This repo shows the mixer **construction** is correct and scales — both
@@ -297,6 +315,10 @@ scaling measurements.
 - `docs/circuit-validity.md` — the full narrative: the correctness bug,
   the real-topology failure and its root cause, the decomposition fix and
   its scaling validation, and the circuit-cost investigation.
+- `docs/bounded-witness-mixer.md` — a second, density-driven witness-blowup
+  axis, and the bounded-witness mixer as an alternative to decomposition:
+  construction, real-scale safety survey, and a correctness bug the
+  cross-check caught in shared code.
 - `scripts/` — synthetic sweep: `graphs.py`, `mixer.py`, `measure.py`,
   `run_scaling_study.py`, `plot.py`, `verify_correctness.py`. Real
   topology: `real_feeders.py`, `run_real_feeder_validation.py`,
@@ -308,7 +330,13 @@ scaling measurements.
   qubit count instead of node count, for direct comparison against
   headline result 1 (reads the existing CSV, no re-measurement).
   `plot_illustrations.py` generates the explanatory diagrams (not
-  measurements).
+  measurements). Bounded-witness mixer: `random_trees.py` (Wilson's
+  algorithm + exchange-graph-walk sampling), `truncated_mixer.py`
+  (bounded-witness construction), `leakage_trace.py` (exact + sparse
+  danger-mass tracing), `verify_leakage_trace.py` (correctness check for
+  all three), `tie_density_sweep.py` (the density-driven witness-blowup
+  axis), `run_bounded_witness_safety_survey.py` (real-scale safety
+  survey).
 - `results/` — one CSV/plot pair per script above, all generated, none
   hand-edited; `*_before_minimization.*` files are the pre-fix numbers,
   kept for the before/after comparison in `docs/circuit-validity.md`;
