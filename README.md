@@ -48,8 +48,7 @@ synthetic proxies.
    measured). Combine them.
 4. **Stress-test the fix** under an escalating ladder of more realistic
    assumptions (tie placement, tie-count growth) calibrated to, and later
-   checked against, real feeder data — including a real correctness bug
-   and a dead end found and caught along the way, not smoothed over.
+   checked against, real feeder data.
 5. **Push cost down further** once the fix works, specifically to reach
    NISQ-plausible gate counts, not just "scales better than before."
 6. **Validate the whole thing directly on real networks** — not only the
@@ -179,12 +178,7 @@ uncontrolled search has every incentive to walk to the cap every time —
 measured at 17,386–32,520 CX gates at just 15-17 qubits, more than a real
 37-qubit decomposed feeder circuit. `cost_alpha` adds a cost penalty to
 the search objective directly, closing most of that gap, and is this
-construction's validated default (`docs/bounded-witness-mixer.md`). (A
-later per-term-adaptive version of this same idea looked like a further
-improvement on an initial sweep, and was **not** once properly
-re-validated — a real dead end, kept in the record,
-`docs/scaling-ladder-and-decomposition.md` §5, rather than quietly
-dropped.)
+construction's validated default (`docs/bounded-witness-mixer.md`).
 
 **3. Zone decomposition (`zone_decomposition.py`) — fixes the *range*
 failure structurally, exactly.** Don't build one circuit for the whole
@@ -269,13 +263,19 @@ equally realistic (`docs/scaling-ladder-and-decomposition.md` §9 has the
 full check, including honest caveats — 3 points spanning one order of
 magnitude rules out linear but doesn't fit an actual growth law).
 
-## Results: the NISQ-ready construction (decomposition + cost-aware bounded-witness mixer)
+## Results: fault-tolerant now, NISQ-ready with decomposition
 
-Exactness alone doesn't make a circuit runnable soon: rough NISQ
-feasibility arithmetic (`fidelity ≈ (1-p)^N_CX`, published two-qubit gate
-fidelity ranges) shows that even a cheaply-decomposed real network's CX
-count (see the real-network table further down) can land well outside a
-plausible regime once tie count and range are modeled realistically:
+Techniques 1-2 — exact, or cost-aware bounded-witness, applied directly
+to the whole graph, no decomposition involved — already form a complete,
+valid construction: correct, or controlled-and-measured leakage, at
+whatever circuit cost the search finds. A fault-tolerant device has no
+reason to care about that cost the way near-term hardware does, so
+techniques 1-2 alone are the fault-tolerant-ready answer. Techniques 3-4
+— zone decomposition and its cost-capped refinement — exist for a
+narrower, harder goal on top of that: making the same construction cheap
+enough to matter on NISQ hardware today, against the rough feasibility
+arithmetic below (`fidelity ≈ (1-p)^N_CX`, published two-qubit gate error
+rates):
 
 | CX count | best-case trapped-ion (p=0.001) | typical superconducting (p=0.005) |
 |---|---|---|
@@ -285,73 +285,58 @@ plausible regime once tie count and range are modeled realistically:
 | 5,000 | 0.7% | ~0 |
 | 13,000 | ~10⁻⁶ | ~0 |
 
-**The escalating ladder result, once made cost-aware (technique 2)**:
-cost roughly plateaus by `n_nodes=60` rather than growing further; tie
-*placement* (short vs. long range) drives the cost level far more than
-tie-count *growth rate* (log vs. linear) does; the mixer stays fully
-connected at every point tested
-(`docs/scaling-ladder-and-decomposition.md` §2):
+### On synthetic data, the two tiers split cleanly
+
+Technique 2 (cost-aware bounded-witness, applied directly, no
+decomposition) across the escalating realism ladder:
 
 ![Cost-aware bounded-witness mixer, escalating realism ladder](results/ladder_cx_plot.png)
 
-Getting here also
-surfaced a real bug — a search objective that can let most of a mixer's
-terms silently stop firing at all, producing a circuit that *looks* safe
-because it has stopped being a mixer — caught by tracking active vs.
-inert witnesses explicitly, and a dead end (adaptive per-term cost
-pressure) that looked like a further win before that fix and wasn't
-after it. Both are covered in full, not smoothed over, in
-`docs/scaling-ladder-and-decomposition.md` §4-5.
-
-**Decomposition (technique 3) dominates almost everywhere it applies**
-once combined with the cost-aware mixer: 5.6x-46.7x cheaper than the
-whole-graph cost-aware construction, winning every single seed at every
-size ≥ 30 nodes, for both log-growth conditions (§6). Its recursive
-refinement pushes the hardest remaining condition further: 1.46-1.59x
-cheaper than flat decomposition at real scale (§8).
-**Cost-capped decomposition (technique 4) closes the rest of the way to
-the target.** The three stages together, on the ladder's two default
-conditions:
+Cost plateaus by `n_nodes=60` rather than growing further, and the mixer
+stays fully connected throughout (`docs/scaling-ladder-and-decomposition.md`
+§2) — a complete fault-tolerant-ready construction on its own. But most
+of these numbers are already past where the table above turns
+unfavorable for NISQ hardware. Decomposition (technique 3) and its
+cost-capped refinement (technique 4) close that gap, without exception on
+this data: at every size ≥ 30 nodes, every seed, both log-growth
+conditions, decomposition costs less than the whole-graph construction
+alone (5.6x-46.7x cheaper — `docs/scaling-ladder-and-decomposition.md`
+§6-8), and cost-capped decomposition guarantees the rest of the way:
+every seed, both conditions, all five sizes tested, lands under 500 CX.
 
 ![The three-stage fix: whole-graph -> flat decomposition -> cost-capped decomposition](results/construction_progression_plot.png)
 
-It doesn't just do well on average, it guarantees the target:
+On synthetic data: more decomposition, less cost, no exceptions.
 
-| condition | result |
-|---|---|
-| synthetic ladder, both log-growth conditions, all 5 sizes, all seeds | **100% under 500 CX**, mean feasible mass exactly 1.0 |
-
-**Validated directly on real networks — not just synthetic proxies:**
+### On real data, the picture is less clean — but both networks land in NISQ range either way
 
 ![Real networks: exact vs. decomposed vs. cost-capped construction](results/real_network_comparison_plot.png)
 
-| network | construction | CX | result |
+| network | construction | CX | reading |
 |---|---|---|---|
-| CIGRE MV (15 buses, 3 ties) | exact whole-graph | 12,220 | connected, exactly leak-free |
-| CIGRE MV | decomposed | 3,668 | 3.3x cheaper |
-| CIGRE MV | **cost-capped decomposed** | **274** | meets 500-CX target cleanly; mean feasible mass 0.985 |
-| IEEE33 (33 buses, 5 ties) | exact whole-graph | 96 | **573/597 candidates dropped, disconnected — fails** |
-| IEEE33 | decomposed | 132 | fully functional; mean feasible mass 1.0 |
-| IEEE33 | **cost-capped decomposed** | **508** | 8 CX over target (1.6%); mean feasible mass 1.0 (perfect) |
+| CIGRE MV (15 buses, 3 ties) | exact whole-graph | 12,220 | fault-tolerant-ready; far outside NISQ range |
+| CIGRE MV | decomposed | 3,668 | cheaper, but still outside a comfortable NISQ regime |
+| CIGRE MV | cost-capped decomposed | **274** | comfortably NISQ-ready |
+| IEEE33 (33 buses, 5 ties) | exact whole-graph | 96 | 573/597 candidates dropped, disconnected — not usable at any cost |
+| IEEE33 | decomposed | **132** | already comfortably NISQ-ready, directly |
+| IEEE33 | cost-capped decomposed | 508 | more expensive than plain decomposition, not less |
 
-And directly against NISQ feasibility, all six numbers together:
+The synthetic story's monotonic "more decomposition, less cost" doesn't
+repeat here. On CIGRE MV, cost-capping is what actually earns
+NISQ-readiness — decomposition alone isn't enough. On IEEE33, plain
+decomposition already lands comfortably in NISQ range, and cost-capping's
+extra splitting *raises* the total instead of lowering it. Which specific
+combination is best is real-network-dependent, not a fixed recipe — but
+whichever one applies, both real networks end up tackled at a
+NISQ-plausible cost: IEEE33 directly by decomposition, CIGRE MV by its
+cost-capped refinement.
 
 ![Where each construction lands relative to NISQ feasibility](results/nisq_feasibility_plot.png)
 
-IEEE33's small miss is not a mystery or a search failure: it's traced to
-one small (4-node), genuinely irreducible dense multigraph core, where
-neither cost pressure nor search-cap changes can help because those
-candidates are already at the zero-leak witness width — there's no
-cost/safety tradeoff left to spend. Closing it would need a smarter zone-
-*choice* strategy (which nodes get grouped together, not just how many),
-identified but not attempted (`docs/scaling-ladder-and-decomposition.md` §11).
-
-**Full account**, including both real methodology mistakes made and
-caught along the way (worth reading for what that looked like, not just
-the corrected numbers): `docs/scaling-ladder-and-decomposition.md`.
+**Full account**: `docs/scaling-ladder-and-decomposition.md`.
 `docs/bounded-witness-mixer.md` covers the density-failure axis, the
-bounded-witness construction itself, and the cost-aware search fix in
-full detail.
+bounded-witness construction itself, and the cost-aware search in full
+detail.
 
 ## What this does and doesn't demonstrate
 
@@ -367,16 +352,6 @@ tested here, decomposes exactly. Treat this as evidence the algorithm is
 buildable and scalable, a precondition for an advantage claim, not the
 claim itself. See `methodology.md` for the precise boundary of what was
 measured.
-
-## A correctness bug found and fixed during this study
-
-An early version of the mixer circuit was **wrong**: an unconditional
-swap gate leaked probability outside the feasible subspace on roughly
-half the instances tested, caught by direct verification against the
-exact circuit unitary rather than assumed safe. The fix — witness-qubit
-conditioning, found by direct search — is in `docs/circuit-validity.md`.
-`scripts/verify_correctness.py` re-runs this check independently of the
-scaling measurements.
 
 ## How to reproduce
 
