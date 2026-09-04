@@ -149,14 +149,49 @@ gradually more expensive — it gives up on candidates outright
 (`dropped_candidates` climbs to 51-95%) and the resulting mixer stops
 being fully connected.
 
-**2. Zone decomposition (`zone_decomposition.py`) — fixes the *range*
-failure.** Don't build one circuit for the whole network: partition into
-zones via a min tie-line-cut, solve each zone's matroid mixer
-independently (small qubit count each), plus one small assembly mixer
-over the contracted zone graph. Guaranteed **exact** by graphic-matroid
-contraction/deletion (the union of every zone's spanning tree plus the
-assembly problem's spanning tree is provably a spanning tree of the whole
-graph) — this is a structural fix to the *constraint*, not an
+**2. Bounded-witness mixer (`truncated_mixer.py`) — bounds *cost*
+directly, at a measured, small leakage cost.** When no small *exact*
+witness exists, don't drop the candidate exchange: search for a witness
+of a fixed, capped size instead, using a **majority-vote** validity rule
+over that smaller set of qubits, and accept the resulting leakage —
+provided it's measured, not assumed, and stays small. `leakage_trace.py`
+traces the actual probability mass this costs on real trajectories
+(exactly, not sampled), separately from the abstract leakage rate the
+search itself optimizes.
+
+![Bounded-witness mixer concept: capping witness size trades cost for a measured, non-zero leakage rate](results/illustration_bounded_witness.png)
+
+*(concept diagram, not a measurement — a hand-constructed 3-qubit example
+chosen to show one clean mismatch, not a real exchange from any graph
+elsewhere in this repo)* the exact witness (all 3 qubits) is never wrong;
+capping to 1 qubit and taking a majority vote gets the `a=0` group right
+unanimously, but state `100` leaks under the `a=1` group's 3-of-4
+majority. A wider witness reduces leakage like this but costs more
+circuit — which is exactly why this technique cannot be used without its
+other half:
+
+**Making that search cost-aware (`cost_alpha`) is not optional.** Picking
+witnesses by leakage alone, with no cost penalty, is actively bad: since
+adding a witness qubit can only ever weakly *reduce* leakage, an
+uncontrolled search has every incentive to walk to the cap every time —
+measured at 17,386–32,520 CX gates at just 15-17 qubits, more than a real
+37-qubit decomposed feeder circuit. `cost_alpha` adds a cost penalty to
+the search objective directly, closing most of that gap, and is this
+construction's validated default (`docs/bounded-witness-mixer.md`). (A
+later per-term-adaptive version of this same idea looked like a further
+improvement on an initial sweep, and was **not** once properly
+re-validated — a real dead end, kept in the record,
+`docs/scaling-ladder-and-decomposition.md` §5, rather than quietly
+dropped.)
+
+**3. Zone decomposition (`zone_decomposition.py`) — fixes the *range*
+failure structurally, exactly.** Don't build one circuit for the whole
+network: partition into zones via a min tie-line-cut, solve each zone's
+matroid mixer independently (small qubit count each), plus one small
+assembly mixer over the contracted zone graph. Guaranteed **exact** by
+graphic-matroid contraction/deletion (the union of every zone's spanning
+tree plus the assembly problem's spanning tree is provably a spanning
+tree of the whole graph) — a structural fix to the *constraint*, not an
 approximation.
 
 ![A graph partitioned into zones, plus the contracted assembly problem](results/illustration_decomposition.png)
@@ -168,57 +203,26 @@ short-range-like, and push the genuinely long-range connections out to
 one small assembly problem instead of forcing the whole graph to absorb
 their cost.
 
-**3. Bounded-witness mixer (`truncated_mixer.py`) — bounds *cost*
-directly, at a measured leakage cost.** An alternative (or complement) to
-decomposition for cases where a fixed witness cap is preferred to
-splitting the problem into zones: instead of dropping a candidate
-exchange outright when no small *exact* witness exists, search for a
-witness of a fixed, capped size using a **majority-vote** validity rule,
-and accept the resulting leakage — provided it's measured, not assumed,
-and stays small. `leakage_trace.py` traces the actual probability mass
-this costs on real trajectories (exactly, not sampled), separately from
-the abstract leakage rate the search itself optimizes.
-
-![Bounded-witness mixer concept: capping witness size trades cost for a measured, non-zero leakage rate](results/illustration_bounded_witness.png)
-
-*(concept diagram, not a measurement — a hand-constructed 3-qubit example
-chosen to show one clean mismatch, not a real exchange from any graph
-elsewhere in this repo)* the exact witness (all 3 qubits) is never wrong;
-capping to 1 qubit and taking a majority vote gets the `a=0` group right
-unanimously, but state `100` leaks under the `a=1` group's 3-of-4
-majority. This is exactly what `cost_alpha` (technique 4) trades against:
-a wider witness reduces leakage like this but costs more circuit.
-
-**4. Cost-aware search (`cost_alpha`) — fixes a real 38x inefficiency.**
-The first version of (3) picked witnesses by leakage alone, and since
-adding a witness qubit can only ever weakly *reduce* leakage, the search
-had every incentive to walk to the cap every time — 17,386–32,520 CX
-gates measured at just 15-17 qubits, more than a real 37-qubit
-decomposed feeder circuit. `cost_alpha` adds a cost penalty to the search
-objective directly, closing most of that gap; it is this construction's
-validated default (`docs/bounded-witness-mixer.md`). A later
-per-term-adaptive version of this same idea looked like a further
-improvement on an initial sweep, and was **not** once properly
-re-validated — a real dead end, kept in the record
-(`docs/scaling-ladder-and-decomposition.md` §5) rather than quietly
-dropped.
-
-**5. Hierarchical (density-aware) decomposition** — for cases where the
-*assembly* graph from step 2 is itself still large or dense: recurse zone
-decomposition on it, scaling `target_zone_size` inversely to the current
-graph's measured density rather than a fixed schedule (found, by direct
+**When the assembly graph itself is still large or dense, recurse.** The
+contracted assembly problem above can end up nearly as hard as the
+original graph if it's built from too many zones with too many boundary
+ties between them. The fix is the same idea applied one level up:
+decompose the assembly graph too, scaling `target_zone_size` inversely to
+its own measured density rather than a fixed schedule (found, by direct
 comparison, to beat both a fixed recursive schedule and naive
-zone-shrinking — `docs/scaling-ladder-and-decomposition.md` §8).
+zone-shrinking — `docs/scaling-ladder-and-decomposition.md` §8). This is
+still zone decomposition, applied recursively — not a separate technique.
 
-**6. Cost-capped decomposition — guarantees a cost target instead of
-hoping for one.** Steps 2 and 5 both pick a zone size up front and hope
-the resulting cost is acceptable; it usually is, but decomposed cost
-turns out to have much higher seed-to-seed variance than whole-graph cost
-(coefficient of variation up to 99% at some sizes — decomposition trades
-one big averaging problem for many small independent ones, and a single
-"unlucky" zone can dominate a seed's total). The fix: build each
-subproblem, transpile it, check its **actual** cost against a threshold,
-and recursively re-split anything over it — measure, don't guess.
+**4. Cost-capped decomposition — guarantees a cost target instead of
+hoping for one.** Technique 3 (flat or recursive) picks a zone size up
+front and hopes the resulting cost is acceptable; it usually is, but
+decomposed cost turns out to have much higher seed-to-seed variance than
+whole-graph cost (coefficient of variation up to 99% at some sizes —
+decomposition trades one big averaging problem for many small independent
+ones, and a single "unlucky" zone can dominate a seed's total). The fix:
+build each subproblem, transpile it, check its **actual** cost against a
+threshold, and recursively re-split anything over it — measure, don't
+guess.
 
 ![Cost-capped decomposition: measure actual cost, recurse only where it's over threshold](results/illustration_cost_capped_decomposition.png)
 
@@ -227,7 +231,7 @@ Gets **every seed of the synthetic ladder under 500 CX**, and comes within
 
 ## Why the ladder is shaped this way, and why log growth
 
-Validating steps 2-6 once, on one real anchor point, isn't enough to
+Validating techniques 2-4 once, on one real anchor point, isn't enough to
 trust the result generally — so this repo stress-tests them across an
 **escalating ladder** of increasingly realistic assumptions, varied along
 two axes, both independently calibrated to the one real anchor point this
@@ -321,7 +325,7 @@ measured directly. This is a harder failure than anything in 1a — 1a's
 "realistic" condition still produced a working, just more expensive,
 circuit; this one doesn't produce a working circuit at all.
 
-**Zone decomposition (technique 2) recovers exactness, and stays cheap as
+**Zone decomposition (technique 3) recovers exactness, and stays cheap as
 size grows.** On the same real 33-bus graph, every zone/assembly
 subproblem is exactly leak-free with witness size 0-4, vs. 22-34 on the
 whole graph (`results/zone_decomposition_results.csv`). On a synthetic
@@ -375,7 +379,7 @@ modeled realistically:
 | 5,000 | 0.7% | ~0 |
 | 13,000 | ~10⁻⁶ | ~0 |
 
-**The escalating ladder result, once made cost-aware (techniques 3+4)**:
+**The escalating ladder result, once made cost-aware (technique 2)**:
 cost roughly plateaus by `n_nodes=60` rather than growing further; tie
 *placement* (short vs. long range) drives the cost level far more than
 tie-count *growth rate* (log vs. linear) does; the mixer stays fully
@@ -393,13 +397,13 @@ pressure) that looked like a further win before that fix and wasn't
 after it. Both are covered in full, not smoothed over, in
 `docs/scaling-ladder-and-decomposition.md` §4-5.
 
-**Decomposition (technique 2) dominates almost everywhere it applies**
+**Decomposition (technique 3) dominates almost everywhere it applies**
 once combined with the cost-aware mixer: 5.6x-46.7x cheaper than the
 whole-graph cost-aware construction, winning every single seed at every
-size ≥ 30 nodes, for both log-growth conditions (§6). Hierarchical
-decomposition (technique 5) pushes the hardest remaining condition
-further: 1.46-1.59x cheaper than flat decomposition at real scale (§8).
-**Cost-capped decomposition (technique 6) closes the rest of the way to
+size ≥ 30 nodes, for both log-growth conditions (§6). Its recursive
+refinement pushes the hardest remaining condition further: 1.46-1.59x
+cheaper than flat decomposition at real scale (§8).
+**Cost-capped decomposition (technique 4) closes the rest of the way to
 the target.** The three stages together, on the ladder's two default
 conditions:
 
@@ -564,7 +568,7 @@ boundary of what was measured.
   `plot_illustrations.py` generates the explanatory diagrams (not
   measurements) -- including `plot_bounded_witness_concept()` and
   `plot_cost_capped_decomposition_concept()`, added alongside this
-  README's restructuring to illustrate techniques 3 and 6 directly, since
+  README's restructuring to illustrate techniques 2 and 4 directly, since
   neither previously had a diagram of its own. Bounded-witness mixer: `random_trees.py` (Wilson's
   algorithm + exchange-graph-walk sampling), `truncated_mixer.py`
   (bounded-witness construction, including the cost-aware search --
@@ -615,7 +619,7 @@ boundary of what was measured.
   instance from the same random seed, needed for partitioning to be
   illustrative at all; `illustration_bounded_witness.png` and
   `illustration_cost_capped_decomposition.png` are concept diagrams for
-  techniques 3 and 6, not derived from any specific measured instance).
+  techniques 2 and 4, not derived from any specific measured instance).
 
 ## License
 
