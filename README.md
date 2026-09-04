@@ -355,40 +355,41 @@ measured.
 
 ## How to reproduce
 
+Three steps cover everything this README claims:
+
 ```
 python -m venv .venv
 source .venv/bin/activate   # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
 
-python scripts/verify_correctness.py                  # exact correctness check (small instances)
-python scripts/run_scaling_study.py                    # synthetic sweep -> results/scaling_*.{csv,png}
-python scripts/run_real_feeder_validation.py            # real IEEE 33-bus graph, whole-graph construction (fails)
-python scripts/run_zone_decomposition_validation.py     # zone-decomposition fix, real IEEE 33-bus graph
-python scripts/run_decomposition_scaling_study.py       # does the fix hold as network size grows? (synthetic)
-python scripts/plot_decomposition_by_qubits.py          # re-plots the above by qubit count, not node count
-python scripts/plot_illustrations.py                    # explanatory diagrams (not measurements)
-python scripts/verify_leakage_trace.py                  # correctness check for the bounded-witness mixer's tooling
-python scripts/tie_density_sweep.py                     # a second witness-blowup axis: tie density (see docs/bounded-witness-mixer.md)
-python scripts/run_bounded_witness_safety_survey.py     # real-scale safety + cost survey for the bounded-witness mixer
-python scripts/measure_truncated_mixer.py               # circuit-cost investigation: truncated mixer's own cost trend + vs. exact
-python scripts/truncated_witness_cap_sweep.py           # witness-cap vs. cost/safety tradeoff (density family)
-python scripts/truncated_witness_cap_sweep_longrange.py # same tradeoff, generalized to the long-range family + real scale
-python scripts/truncated_mixer_search_refinement.py     # cap=0/1 + the cost-aware search fix (cost_alpha)
-python scripts/run_scaling_study_log_ties.py            # is headline result 1's flat-tie-count assumption load-bearing?
-python scripts/run_cost_aware_scaling_ladder.py         # escalating realism ladder for the bounded-witness mixer
-python scripts/run_cost_aware_scaling_ladder_aggressive.py  # pushing cost down: the never-fire bug, made visible
-python scripts/run_fixed_alpha_ladder.py                # fixed cost_alpha baseline, re-measured post-fix
-python scripts/run_decomposed_cost_aware_ladder.py      # decomposition + bounded-witness mixer combined (the actual fix)
-python scripts/run_best_of_both_ladder.py               # confirms decomposition dominates -- never loses a seed
-python scripts/run_hierarchical_decomposed_ladder.py    # density-aware recursive decomposition, for the still-hard conditions
-python scripts/run_real_networks_hierarchical.py        # this branch's actual construction, run directly on CIGRE MV + IEEE33
-python scripts/run_cost_capped_decomposition.py         # decomposition that MEASURES cost and re-splits over-threshold subproblems
-python scripts/plot_results_figures.py                  # re-plots the README's result figures from already-committed CSVs (no re-measurement)
+python scripts/verify_correctness.py && python scripts/verify_leakage_trace.py
+# correctness: the exact construction is exactly leak-free and fully
+# connected wherever it applies; the bounded-witness construction's
+# leakage tooling (sparse tracer, Wilson's-algorithm sampling) is verified
+# against an exact reference.
+
+python scripts/run_real_networks_hierarchical.py
+# the real-network numbers the Results section reports: exact vs.
+# decomposed vs. cost-capped, both CIGRE MV and IEEE33.
+
+python scripts/plot_results_figures.py && python scripts/plot_illustrations.py
+# every figure in this README, regenerated from already-committed data.
 ```
 
 All scripts are deterministic (fixed random seeds); re-running should
 reproduce the committed files in `results/` exactly, modulo `qiskit`/
 `networkx` version differences in transpilation.
+
+This reproduces what's *shown* here, not every measurement behind it —
+`ladder_cx_plot.png` and `construction_progression_plot.png` read
+already-committed CSVs (`results/cost_aware_scaling_ladder_*.csv`,
+`decomposed_cost_aware_ladder_*.csv`, `cost_capped_decomposition_*.csv`)
+rather than re-deriving them from scratch. To regenerate those (or dig
+into the fuller investigation — the escalating realism ladder, the
+density-blowup axis, hierarchical decomposition, the real-topology
+growth-model check), the complete set of scripts is listed under
+`scripts/` in "Repository layout" below, each tied to the section of
+`docs/*.md` it backs.
 
 ## Scope
 
