@@ -28,7 +28,15 @@ real anchor point this repo has (5 ties at the 33-bus feeder,
   combined with long-range placement the single hardest condition
   tested anywhere in this repo).
 
-Four conditions: short+log, short+linear, long+log, long+linear.
+Four conditions were originally tested: short+log, short+linear,
+long+log, long+linear. A later real-topology check
+(docs/scaling-ladder-and-decomposition.md) found real tie-count/n_bus
+ratios drop sharply with size across three real/real-benchmark networks
+-- consistent with LOG growth, clearly inconsistent with LINEAR (which
+would keep that ratio flat). The two log-growth conditions are now
+`CONDITIONS` (what this script runs by default); the linear-growth ones
+move to `STRESS_TEST_CONDITIONS` -- kept, and still fully reproducible,
+just no longer presented as equally realistic.
 
 ## Method (identical across all four conditions and to
 run_bounded_witness_safety_survey.py, for direct comparability)
@@ -94,16 +102,36 @@ def k_ties_linear(n_nodes: int) -> int:
     return max(1, round(LINEAR_C * n_nodes))
 
 
+# `docs/scaling-ladder-and-decomposition.md`'s real-topology check found
+# real tie-count/n_bus ratios drop sharply with size (0.20 at 15 buses,
+# 0.152 at 33, 0.034 at 179 -- three real/real-benchmark pandapower
+# networks) -- consistent with LOG growth, clearly inconsistent with
+# LINEAR (which would keep that ratio roughly flat). CONDITIONS below is
+# now just the two log-growth conditions this repo actually recommends
+# as realistic; STRESS_TEST_CONDITIONS keeps the linear-growth ones
+# available (k_ties_linear, generate_feeder_graph*, and every result
+# already measured under them are UNCHANGED, not deleted) for anyone who
+# wants to re-run a deliberately-harder-than-real-data stress test, but
+# they are no longer what a plain re-run of any script in this branch
+# measures by default.
 CONDITIONS = {
     "short_log": (generate_feeder_graph, k_ties_log),
-    "short_linear": (generate_feeder_graph, k_ties_linear),
     "long_log": (generate_feeder_graph_long_range_ties, k_ties_log),
+}
+
+STRESS_TEST_CONDITIONS = {
+    **CONDITIONS,
+    "short_linear": (generate_feeder_graph, k_ties_linear),
     "long_linear": (generate_feeder_graph_long_range_ties, k_ties_linear),
 }
 
 
 def run_one(condition: str, n_nodes: int, seed: int) -> dict:
-    generator, k_ties_fn = CONDITIONS[condition]
+    # STRESS_TEST_CONDITIONS, not CONDITIONS: keeps run_one callable with a
+    # stress-test condition name directly (e.g. from a script explicitly
+    # reproducing the linear-growth check) even though `main()` below only
+    # ITERATES over the two real-data-supported conditions by default.
+    generator, k_ties_fn = STRESS_TEST_CONDITIONS[condition]
     k_ties = k_ties_fn(n_nodes)
     graph = generator(n_nodes, k_ties, seed)
 
