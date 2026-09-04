@@ -60,3 +60,51 @@ def load_ieee33() -> FeederGraph:
 
     all_edges = tuple(sorted(set(tree_edges) | set(tie_edges)))
     return FeederGraph(n_nodes=n_nodes, k_ties=len(tie_edges), edges=all_edges)
+
+
+def load_cigre_mv() -> FeederGraph:
+    """CIGRE medium-voltage benchmark distribution network (Task Force
+    C6.04.02) -- loaded via `pandapower.networks.create_cigre_network_mv`.
+    A standardized, widely-used realistic benchmark topology (not an
+    as-built utility feeder like case33bw, but not a random synthetic
+    graph either) -- a second, independently-sourced, differently-sized
+    (15 buses vs. case33bw's 33) real-topology check.
+
+    Same discipline as `load_ieee33`: ties are the lines with an open
+    switch or `in_service=False` (checked directly, not assumed), plus
+    this network's 2 transformers are added as always-tree edges (a
+    transformer connecting two voltage levels is not a switchable tie,
+    and excluding it here would leave buses on the other side spuriously
+    disconnected) -- and the resulting tree-edge set is checked to
+    actually form a spanning tree before use, exactly like `load_ieee33`
+    raises rather than proceeding silently if that check fails."""
+    net = pn.create_cigre_network_mv()
+    n_nodes = len(net.bus)
+
+    open_line_switch = set()
+    if len(net.switch):
+        for _, row in net.switch[net.switch.et == "l"].iterrows():
+            if not row["closed"]:
+                open_line_switch.add(row["element"])
+
+    tree_edges = []
+    tie_edges = []
+    for lidx, line in net.line.iterrows():
+        e = tuple(sorted((int(line["from_bus"]), int(line["to_bus"]))))
+        is_tie = (not line.get("in_service", True)) or (lidx in open_line_switch)
+        (tie_edges if is_tie else tree_edges).append(e)
+    for _, t in net.trafo.iterrows():
+        tree_edges.append(tuple(sorted((int(t.hv_bus), int(t.lv_bus)))))
+
+    g_tree = nx.Graph()
+    g_tree.add_nodes_from(range(n_nodes))
+    g_tree.add_edges_from(tree_edges)
+    if not nx.is_tree(g_tree):
+        raise ValueError(
+            "CIGRE MV's in-service lines + transformers do not form a spanning tree -- "
+            "the assumption this loader relies on is violated for this "
+            "pandapower version's bundled data; do not proceed silently."
+        )
+
+    all_edges = tuple(sorted(set(tree_edges) | set(tie_edges)))
+    return FeederGraph(n_nodes=n_nodes, k_ties=len(tie_edges), edges=all_edges)

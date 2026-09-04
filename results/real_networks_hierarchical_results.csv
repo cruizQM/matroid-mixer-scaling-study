@@ -1,0 +1,4 @@
+network,method,n_terms,max_witness_size,dropped_candidates,fully_connected,leak_free_verified,cx_count,depth,n_zones,assembly_n_nodes,unsafe_rate,mean_feasible_mass
+CIGRE_MV,exact_whole_graph,16,4,37,True,True,12220,24245,,,0.0,1.0
+CIGRE_MV,decomposed,10,,0,,,3668,7101,2,2,0.0303,0.9995
+IEEE33,decomposed,6,,0,,,132,272,4,4,0.0,1.0
