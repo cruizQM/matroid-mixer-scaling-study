@@ -131,10 +131,14 @@ demonstrate" below for the boundary between the two.
 
 ## Techniques used, and what problem each one solves
 
-In the order they're needed to understand the results, not the order
-they were built (the build order — including two real detours — is in
-"Headline result 4" of `docs/scaling-ladder-and-decomposition.md`, kept
-there as part of the evidence, not hidden here).
+Three techniques, building toward the two-tier answer above: techniques
+1-2 alone are already enough for a fault-tolerant device; technique 3 —
+decomposition, refined to guarantee its own cost — is what makes the
+same construction NISQ-ready. In the order they're needed to understand
+the results, not the order they were built (the build order — including
+two real detours — is in "Headline result 4" of
+`docs/scaling-ladder-and-decomposition.md`, kept there as part of the
+evidence, not hidden here).
 
 **1. Exact matroid mixer (`mixer.py`, `build_matroid_mixer`).** For each
 candidate exchange, brute-force search for the smallest witness that
@@ -184,14 +188,17 @@ the search objective directly, closing most of that gap, and is this
 construction's validated default (`docs/bounded-witness-mixer.md`).
 
 **3. Zone decomposition (`zone_decomposition.py`) — fixes the *range*
-failure structurally, exactly.** Don't build one circuit for the whole
-network: partition into zones via a min tie-line-cut, solve each zone's
-matroid mixer independently (small qubit count each), plus one small
-assembly mixer over the contracted zone graph. Guaranteed **exact** by
-graphic-matroid contraction/deletion (the union of every zone's spanning
-tree plus the assembly problem's spanning tree is provably a spanning
-tree of the whole graph) — a structural fix to the *constraint*, not an
-approximation.
+failure structurally and exactly, and can be made to guarantee its own
+cost.** Don't build one circuit for the whole network: partition into
+zones via a min tie-line-cut, solve each zone's matroid mixer
+independently (small qubit count each), plus one small assembly mixer
+over the contracted zone graph. Guaranteed **exact** by graphic-matroid
+contraction/deletion (the union of every zone's spanning tree plus the
+assembly problem's spanning tree is provably a spanning tree of the whole
+graph) — a structural fix to the *constraint*, not an approximation. When
+the assembly graph is itself still large or dense, the same idea applies
+one level up: decompose it too, scaling zone size to its own measured
+density instead of a fixed schedule.
 
 ![A graph partitioned into zones, plus the contracted assembly problem](results/illustration_decomposition.png)
 
@@ -202,83 +209,34 @@ short-range-like, and push the genuinely long-range connections out to
 one small assembly problem instead of forcing the whole graph to absorb
 their cost.
 
-**When the assembly graph itself is still large or dense, recurse.** The
-contracted assembly problem above can end up nearly as hard as the
-original graph if it's built from too many zones with too many boundary
-ties between them. The fix is the same idea applied one level up:
-decompose the assembly graph too, scaling `target_zone_size` inversely to
-its own measured density rather than a fixed schedule (found, by direct
-comparison, to beat both a fixed recursive schedule and naive
-zone-shrinking — `docs/scaling-ladder-and-decomposition.md` §8). This is
-still zone decomposition, applied recursively — not a separate technique.
-
-**4. Cost-capped decomposition — guarantees a cost target instead of
-hoping for one.** Technique 3 (flat or recursive) picks a zone size up
-front and hopes the resulting cost is acceptable; it usually is, but
-decomposed cost turns out to have much higher seed-to-seed variance than
-whole-graph cost (coefficient of variation up to 99% at some sizes —
-decomposition trades one big averaging problem for many small independent
-ones, and a single "unlucky" zone can dominate a seed's total). The fix:
-build each subproblem, transpile it, check its **actual** cost against a
-threshold, and recursively re-split anything over it — measure, don't
-guess.
+**Picking a zone size up front only gets you *a* cost, not a *controlled*
+one.** Decomposed cost turns out to have much higher seed-to-seed
+variance than whole-graph cost (coefficient of variation up to 99% at
+some sizes — decomposition trades one big averaging problem for many
+small independent ones, and a single "unlucky" zone can dominate a
+seed's total). The fix is the same discipline as technique 2's: measure,
+don't guess. Build each subproblem, transpile it, check its **actual**
+cost against a threshold, and recursively re-split anything over it.
 
 ![Cost-capped decomposition: measure actual cost, recurse only where it's over threshold](results/illustration_cost_capped_decomposition.png)
 
 Gets **every seed of the synthetic ladder under 500 CX**, and comes within
-1.6% of that target on real data (`docs/scaling-ladder-and-decomposition.md` §11).
-
-## Why the ladder is shaped this way, and why log growth
-
-Validating techniques 2-4 once, on one real anchor point, isn't enough to
-trust the result generally — so this repo stress-tests them across an
-**escalating ladder** of increasingly realistic assumptions, varied along
-two axes, both independently calibrated to the one real anchor point this
-repo started with (5 ties at the 33-bus feeder):
-
-- **tie placement**: short-range (nearest-tie, the family used in the
-  "Background" figures above) vs. long-range (the family the real-feeder
-  failure and the bounded-witness safety survey are built on).
-- **tie-count growth**: log (`round(1.43*ln(n))`, mild) vs. linear
-  (`round(0.1515*n)`, aggressive).
-
-**This choice was checked against real data, not just assumed.** Three
-real/real-benchmark networks (CIGRE MV, IEEE 33-bus, and a real German MV
-network, `mv_oberrhein`, via `pandapower.networks`), spanning a 12x size
-range:
-
-| network | n_bus | n_ties | ties/n_bus |
-|---|---|---|---|
-| CIGRE MV | 15 | 3 | 0.200 |
-| case33bw (IEEE33) | 33 | 5 | 0.152 |
-| mv_oberrhein | 179 | 6 | 0.034 |
-
-The ratio drops 6x from smallest to largest — flatly inconsistent with
-linear growth (which would keep it roughly constant), reasonably
-consistent with log growth (`ties/log(n_bus)` comes out to 1.11, 1.43,
-1.16 — much tighter). Real tie *range* was checked the same way: real
-ties consistently span 33-45% of network diameter, matching this repo's
-long-range generator far better than its short-range one (which gets
-*worse*, not better, with scale). **`CONDITIONS` therefore defaults to
-the two log-growth conditions**; linear growth is kept as an explicit,
-fully reproducible stress test, not deleted, but no longer presented as
-equally realistic (`docs/scaling-ladder-and-decomposition.md` §9 has the
-full check, including honest caveats — 3 points spanning one order of
-magnitude rules out linear but doesn't fit an actual growth law).
+a few percent of that target on real data
+(`docs/scaling-ladder-and-decomposition.md` §8, §11).
 
 ## Results: fault-tolerant now, NISQ-ready with decomposition
 
-Techniques 1-2 — exact, or cost-aware bounded-witness, applied directly
-to the whole graph, no decomposition involved — already form a complete,
-valid construction: correct, or controlled-and-measured leakage, at
-whatever circuit cost the search finds. A fault-tolerant device has no
-reason to care about that cost the way near-term hardware does, so
-techniques 1-2 alone are the fault-tolerant-ready answer. Techniques 3-4
-— zone decomposition and its cost-capped refinement — exist for a
-narrower, harder goal on top of that: making the same construction cheap
-enough to matter on NISQ hardware today, against the rough feasibility
-arithmetic below (`fidelity ≈ (1-p)^N_CX`, published two-qubit gate error
-rates):
+Recall the two-tier answer from the top: techniques 1-2 — exact, or
+cost-aware bounded-witness, applied directly to the whole graph, no
+decomposition involved — already form a complete, valid construction:
+correct, or controlled-and-measured leakage, at whatever circuit cost the
+search finds. A fault-tolerant device has no reason to care about that
+cost the way near-term hardware does, so techniques 1-2 alone are the
+fault-tolerant-ready answer. Technique 3 — zone decomposition, refined to
+guarantee its own cost — exists for a narrower, harder goal on top of
+that: making the same construction cheap enough to matter on NISQ
+hardware today, against the rough feasibility arithmetic below
+(`fidelity ≈ (1-p)^N_CX`, published two-qubit gate error rates):
 
 | CX count | best-case trapped-ion (p=0.001) | typical superconducting (p=0.005) |
 |---|---|---|
@@ -290,51 +248,65 @@ rates):
 
 ### On synthetic data, the two tiers split cleanly
 
-Technique 2 (cost-aware bounded-witness, applied directly, no
-decomposition) across the escalating realism ladder:
+Technique 2 is stress-tested across an escalating ladder of two things
+checked against real data rather than assumed: tie placement (short vs.
+long-range — real ties span 33-45% of network diameter, matching the
+long-range generator far better than the short-range one) and tie-count
+growth (log-scaled, `k_ties(n) ≈ 1.43 ln n` — real and benchmark networks
+show the ties-per-bus ratio dropping 6x from 15 to 179 buses, consistent
+with log growth — `docs/scaling-ladder-and-decomposition.md` §9). Across
+that ladder, technique 2 (whole-graph, no decomposition) plateaus by
+`n_nodes=60` and stays fully connected throughout (§2) — a complete
+fault-tolerant-ready construction on its own, but, as the table above
+already shows, well past a comfortable NISQ regime at these sizes.
+Technique 3 fixes that without exception on this data — at every size
+≥ 30 nodes, every seed, both conditions, decomposition alone already
+costs less than the whole-graph construction (5.6x-46.7x cheaper), and
+its cost-capped refinement guarantees the rest of the way: every seed,
+every condition, every size tested, lands under 500 CX (§6-8):
 
-![Cost-aware bounded-witness mixer, escalating realism ladder](results/ladder_cx_plot.png)
+![Synthetic ladder: whole-graph -> zone decomposition -> cost-capped refinement](results/construction_progression_plot.png)
 
-Cost plateaus by `n_nodes=60` rather than growing further, and the mixer
-stays fully connected throughout (`docs/scaling-ladder-and-decomposition.md`
-§2) — a complete fault-tolerant-ready construction on its own. But most
-of these numbers are already past where the table above turns
-unfavorable for NISQ hardware. Decomposition (technique 3) and its
-cost-capped refinement (technique 4) close that gap, without exception on
-this data: at every size ≥ 30 nodes, every seed, both log-growth
-conditions, decomposition costs less than the whole-graph construction
-alone (5.6x-46.7x cheaper — `docs/scaling-ladder-and-decomposition.md`
-§6-8), and cost-capped decomposition guarantees the rest of the way:
-every seed, both conditions, all five sizes tested, lands under 500 CX.
+At the hardest size tested (`n_nodes=150`), directly against the
+feasibility numbers above:
 
-![The three-stage fix: whole-graph -> flat decomposition -> cost-capped decomposition](results/construction_progression_plot.png)
+| condition | construction | CX | reading |
+|---|---|---|---|
+| short-range, log growth | whole-graph | 2,361 | borderline on trapped-ion; not usable on superconducting |
+| short-range, log growth | cost-capped | **97** | comfortably NISQ-ready |
+| long-range, log growth | whole-graph | 10,825 | not usable on either device |
+| long-range, log growth | cost-capped | **401** | comfortably NISQ-ready |
 
-On synthetic data: more decomposition, less cost, no exceptions.
+![Where the synthetic ladder lands relative to NISQ feasibility](results/synthetic_nisq_feasibility_plot.png)
+
+On synthetic data: more decomposition, less cost, no exceptions — and
+technique 3's cost-capped refinement is what actually earns NISQ
+feasibility on the harder, long-range condition.
 
 ### On real data, the picture is less clean — but both networks land in NISQ range either way
 
-![Real networks: exact vs. decomposed vs. cost-capped construction](results/real_network_comparison_plot.png)
+![Real networks: exact vs. zone decomposition vs. cost-capped refinement](results/real_network_comparison_plot.png)
 
 | network | construction | CX | reading |
 |---|---|---|---|
 | CIGRE MV (15 buses, 3 ties) | exact whole-graph | 12,220 | fault-tolerant-ready; far outside NISQ range |
-| CIGRE MV | decomposed | 3,668 | cheaper, but still outside a comfortable NISQ regime |
-| CIGRE MV | cost-capped decomposed | **274** | comfortably NISQ-ready |
+| CIGRE MV | zone decomposition | 3,668 | cheaper, but still outside a comfortable NISQ regime |
+| CIGRE MV | cost-capped refinement | **274** | comfortably NISQ-ready |
 | IEEE33 (33 buses, 5 ties) | exact whole-graph | 96 | 573/597 candidates dropped, disconnected — not usable at any cost |
-| IEEE33 | decomposed | **132** | already comfortably NISQ-ready, directly |
-| IEEE33 | cost-capped decomposed | 508 | more expensive than plain decomposition, not less |
+| IEEE33 | zone decomposition | **132** | already comfortably NISQ-ready, directly |
+| IEEE33 | cost-capped refinement | 508 | more expensive than plain decomposition, not less |
 
-The synthetic story's monotonic "more decomposition, less cost" doesn't
-repeat here. On CIGRE MV, cost-capping is what actually earns
-NISQ-readiness — decomposition alone isn't enough. On IEEE33, plain
-decomposition already lands comfortably in NISQ range, and cost-capping's
-extra splitting *raises* the total instead of lowering it. Which specific
-combination is best is real-network-dependent, not a fixed recipe — but
-whichever one applies, both real networks end up tackled at a
-NISQ-plausible cost: IEEE33 directly by decomposition, CIGRE MV by its
-cost-capped refinement.
+Unlike on synthetic data, "more decomposition, less cost" doesn't hold
+here. On CIGRE MV, the cost-capped refinement is what actually earns
+NISQ-readiness — plain zone decomposition alone isn't enough. On IEEE33,
+plain zone decomposition already lands comfortably in NISQ range, and
+the cost-capped refinement's extra splitting *raises* the total instead
+of lowering it. Which specific stage of technique 3 is best is
+real-network-dependent, not a fixed recipe — but whichever one applies,
+both real networks end up tackled at a NISQ-plausible cost: IEEE33
+directly by decomposition, CIGRE MV by its cost-capped refinement.
 
-![Where each construction lands relative to NISQ feasibility](results/nisq_feasibility_plot.png)
+![Where each real-network construction lands relative to NISQ feasibility](results/real_nisq_feasibility_plot.png)
 
 **Full account**: `docs/scaling-ladder-and-decomposition.md`.
 `docs/bounded-witness-mixer.md` covers the density-failure axis, the
@@ -384,8 +356,8 @@ reproduce the committed files in `results/` exactly, modulo `qiskit`/
 `networkx` version differences in transpilation.
 
 This reproduces what's *shown* here, not every measurement behind it —
-`ladder_cx_plot.png` and `construction_progression_plot.png` read
-already-committed CSVs (`results/cost_aware_scaling_ladder_*.csv`,
+`construction_progression_plot.png` and `synthetic_nisq_feasibility_plot.png`
+read already-committed CSVs (`results/cost_aware_scaling_ladder_*.csv`,
 `decomposed_cost_aware_ladder_*.csv`, `cost_capped_decomposition_*.csv`)
 rather than re-deriving them from scratch. To regenerate those (or dig
 into the fuller investigation — the escalating realism ladder, the
@@ -432,10 +404,9 @@ QAOA performance.
   decomposition script itself; density-aware hierarchical decomposition,
   pushing the hardest remaining conditions further toward NISQ
   feasibility; a real-topology check validating log-growth/long-range
-  tie modeling against real (and real-benchmark) feeder data, after
-  which linear tie-count growth moved from a default condition to an
-  explicit stress test; direct validation of the actual construction on
-  two real networks; cost-capped decomposition (measures each
+  tie modeling against real (and real-benchmark) feeder data; direct
+  validation of the actual construction on two real networks;
+  cost-capped decomposition (measures each
   subproblem's actual cost and recursively re-splits anything over a
   threshold, guaranteeing every synthetic-ladder seed stays under 500
   CX, and coming within 1.6% of that target on real data); and two
@@ -456,7 +427,7 @@ QAOA performance.
   `plot_illustrations.py` generates the explanatory diagrams (not
   measurements) -- including `plot_bounded_witness_concept()` and
   `plot_cost_capped_decomposition_concept()`, added alongside this
-  README's restructuring to illustrate techniques 2 and 4 directly, since
+  README's restructuring to illustrate techniques 2 and 3 directly, since
   neither previously had a diagram of its own. Bounded-witness mixer: `random_trees.py` (Wilson's
   algorithm + exchange-graph-walk sampling), `truncated_mixer.py`
   (bounded-witness construction, including the cost-aware search --
@@ -493,10 +464,11 @@ QAOA performance.
   a threshold, rather than picking a zone size and hoping -- 100% success
   on the synthetic ladder, tested on both real networks too) round it out.
   `plot_results_figures.py` generates this README's four result figures
-  (`ladder_cx_plot.png`, `construction_progression_plot.png`,
-  `nisq_feasibility_plot.png`, `real_network_comparison_plot.png`)
-  directly from already-committed CSVs -- no re-measurement, same
-  discipline as `plot_decomposition_by_qubits.py`.
+  -- one cost-progression plot and one NISQ-feasibility plot per side of
+  the synthetic/real split (`construction_progression_plot.png`,
+  `synthetic_nisq_feasibility_plot.png`, `real_network_comparison_plot.png`,
+  `real_nisq_feasibility_plot.png`) -- directly from already-committed
+  CSVs -- no re-measurement, same discipline as `plot_decomposition_by_qubits.py`.
 - `results/` — one CSV/plot pair per script above, all generated, none
   hand-edited; `*_before_minimization.*` files are the pre-fix numbers,
   kept for the before/after comparison in `docs/circuit-validity.md`;
@@ -507,7 +479,7 @@ QAOA performance.
   instance from the same random seed, needed for partitioning to be
   illustrative at all; `illustration_bounded_witness.png` and
   `illustration_cost_capped_decomposition.png` are concept diagrams for
-  techniques 2 and 4, not derived from any specific measured instance).
+  techniques 2 and 3, not derived from any specific measured instance).
 
 ## License
 
