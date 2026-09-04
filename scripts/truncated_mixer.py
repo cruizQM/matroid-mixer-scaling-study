@@ -111,6 +111,7 @@ def _search_truncated_witness(
     max_size: int,
     rng: np.random.Generator,
     attempts_per_size: int = 60,
+    cost_alpha: float = 0.0,
 ) -> Tuple[Tuple[int, ...], Tuple[Tuple[int, ...], ...], float]:
     """Random-restart search: try `attempts_per_size` random subsets at
     each size up to `max_size`, keep whichever minimizes misclassification.
@@ -123,9 +124,27 @@ def _search_truncated_witness(
     interaction effect (validity depends on a COMBINATION of qubits, not
     any one of them additively) -- greedy provably cannot discover that.
     Random-restart search has no such blind spot, at the cost of not being
-    guaranteed optimal either -- a heuristic, stated as one."""
+    guaranteed optimal either -- a heuristic, stated as one.
+
+    `cost_alpha=0.0` (default) reproduces the original behavior exactly:
+    keep whichever witness minimizes leakage alone, regardless of size.
+    Found (`docs/bounded-witness-mixer.md`'s circuit-cost investigation)
+    to be a real problem: since adding a witness qubit can only weakly
+    reduce leakage, never increase it, a leakage-only objective has no
+    reason not to walk to `max_size` every time, even when a narrower
+    witness would give nearly the same leakage at a fraction of the
+    circuit cost (a generic k-controlled 2-qubit gate's cost grows
+    steeply in k). `cost_alpha > 0` scores each candidate as
+    `leak + cost_alpha * 2**size` instead of `leak` alone -- `2**size` as
+    a cheap, size-only proxy for the controlled-gate cost that width
+    actually drives, not a transpiled measurement (that would make the
+    search itself expensive). `best_leak`/the returned `leak` are always
+    the ACTUAL leakage of the selected witness, never the combined score
+    -- the score only decides which candidate wins, it isn't reported as
+    if it were the leakage rate."""
     best_witness: Tuple[int, ...] = ()
     _, best_leak = _majority_rule(trigger, validity, best_witness)
+    best_score = best_leak  # size 0 costs nothing extra: 2**0 * cost_alpha would still be a flat offset, omitted since it's constant across all size-0 candidates (there's only one)
 
     for size in range(1, max_size + 1):
         if size > len(candidate_pool):
@@ -135,7 +154,9 @@ def _search_truncated_witness(
             # `.control(ctrl_state=...)` rejects numpy int types outright.
             witness = tuple(sorted(int(q) for q in rng.choice(candidate_pool, size=size, replace=False)))
             _, leak = _majority_rule(trigger, validity, witness)
-            if leak < best_leak - 1e-12:
+            score = leak + cost_alpha * (2 ** size)
+            if score < best_score - 1e-12:
+                best_score = score
                 best_leak = leak
                 best_witness = witness
 
@@ -174,6 +195,7 @@ def build_truncated_witness_mixer(
     exact_search_max_size: int = 2,
     search_attempts_per_size: int = 60,
     seed: int = 0,
+    cost_alpha: float = 0.01,
 ) -> TruncatedMixerConstruction:
     """Same candidate-pair selection loop as `mixer.build_matroid_mixer`
     (union-find over which (e,f) pairs connect new components), but every
@@ -190,7 +212,20 @@ def build_truncated_witness_mixer(
     instances this module targets (most candidates there have no small
     exact witness at all, so size-4 search fails, expensively, almost
     every time -- see `docs/bounded-witness-mixer.md`). Size 2 costs much
-    less and still catches the genuinely cheap exact cases."""
+    less and still catches the genuinely cheap exact cases.
+
+    `cost_alpha` defaults to `0.01`, not `0.0`. This was changed after
+    `docs/bounded-witness-mixer.md`'s circuit-cost investigation found the
+    original cost-blind default produced circuits costing 16-38x more
+    than necessary for no proportional safety benefit -- see
+    `_search_truncated_witness`'s docstring for the mechanism, and
+    `docs/bounded-witness-mixer.md`'s "Making the search cost-aware"
+    section for the empirical comparison across `cost_alpha` values that
+    led to this specific number (it consistently sat at or near the point
+    that dominates a fixed-cap approach: comparable-or-better safety at a
+    fraction of the cost, across every density and network size tested;
+    a pure `cost_alpha=0.0` reproduces the original, more expensive
+    behavior exactly if that's ever wanted for comparison)."""
     n_qubits = graph.n_edges
     index_of: Dict[int, int] = {mask: i for i, mask in enumerate(trees)}
     tree_set = set(trees)
@@ -256,7 +291,7 @@ def build_truncated_witness_mixer(
                     candidate_pool = tuple(q for q in range(n_qubits) if q not in (e, f))
                 approx_witness, approx_patterns, leak = _search_truncated_witness(
                     trigger, validity, candidate_pool, max_witness_size, rng,
-                    attempts_per_size=search_attempts_per_size,
+                    attempts_per_size=search_attempts_per_size, cost_alpha=cost_alpha,
                 )
                 minimized_cubes = _minimize_patterns(len(approx_witness), approx_patterns)
                 terms.append(ExchangeTerm(e=e, f=f, witness_qubits=approx_witness, valid_patterns=approx_patterns, minimized_cubes=minimized_cubes))
