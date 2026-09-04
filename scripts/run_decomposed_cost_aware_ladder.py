@@ -19,8 +19,9 @@ Same four conditions/sizes/seeds as the escalating-realism ladder. At
 each instance: partition into zones (`zone_decomposition.partition_zones_by_size`,
 `target_zone_size=8`, matching `run_decomposition_scaling_study.py`'s own
 convention), then build a cost-aware truncated mixer
-(`adaptive=True, gain_price=0.01`, the validated default -- NOT the
-aggressive/broken setting from the inertness investigation) on EACH zone
+(`adaptive=False, cost_alpha=0.01`, the validated default -- see
+`measure_subproblem`'s docstring for why this is `adaptive=False`, not
+the `adaptive=True` an earlier version of this script used) on EACH zone
 subgraph and the assembly graph independently, using exact enumeration
 for each (zones are small enough that this stays fast, unlike the
 whole-graph case). Reports TOTAL CX/depth summed across every
@@ -104,7 +105,18 @@ def measure_subproblem(graph, seed: int) -> dict:
     truncated = build_truncated_witness_mixer(
         graph, trees, max_witness_size=MAX_WITNESS_SIZE,
         exact_search_max_size=EXACT_SEARCH_MAX_SIZE, seed=seed,
-        adaptive=True, gain_price=GAIN_PRICE,
+        adaptive=False, cost_alpha=GAIN_PRICE,
+        # NOT adaptive=True: this script originally used the adaptive search
+        # (matching what looked, at the time, like the better default).
+        # docs/scaling-ladder-and-decomposition.md later found adaptive does
+        # NOT reliably beat fixed cost_alpha once properly re-validated --
+        # confirmed to matter here too, not just at whole-graph scale: one
+        # specific zone (of 19, long_linear/n_nodes=150/seed=0) cost 3,550 CX
+        # under adaptive vs. 292 CX under fixed cost_alpha=0.01, a 12x gap,
+        # and was the dominant contributor to that instance's total zone
+        # cost. Fixed to use the validated default; every result in this
+        # script (and run_best_of_both_ladder.py, run_hierarchical_decomposed_ladder.py,
+        # which both build on it) was re-run after this fix, not left stale.
     )
     construction = truncated.construction
     active_terms = sum(1 for t in construction.terms if t.minimized_gate_count > 0)
