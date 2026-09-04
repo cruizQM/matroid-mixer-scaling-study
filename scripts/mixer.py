@@ -492,10 +492,22 @@ def exchange_term_circuit(n_qubits: int, term: ExchangeTerm, beta) -> QuantumCir
     qc = QuantumCircuit(n_qubits, name=f"exchange({term.e},{term.f})")
     block = _swap_block(beta).to_gate()
 
-    if not term.witness_qubits:
-        qc.append(block, [term.e, term.f])
-        return qc
-
+    # No `if not term.witness_qubits: fire unconditionally` shortcut here:
+    # that was tried first and is WRONG whenever a zero-qubit witness can
+    # mean "never fire" (valid_patterns == (), minimized_cubes == ()) and
+    # not just "always fire" (valid_patterns == ((),), minimized_cubes ==
+    # ((),)). For `build_matroid_mixer`'s exact construction the former
+    # can't happen (find_witness_set only returns witness=() when every
+    # trigger state shares the same, and by then already-known-nonempty,
+    # validity), so the shortcut looked safe there -- but it silently
+    # broke `truncated_mixer.py`'s approximate construction, where a
+    # majority-vote rule over 0 witness qubits legitimately comes out
+    # "never fire" (caught by `verify_leakage_trace.py` cross-checking
+    # this function's actual circuit against the declared valid_patterns,
+    # not assumed). The general loop below already handles both cases
+    # correctly via `term.minimized_cubes` (empty tuple of cubes = no
+    # gates = never fire; one all-don't-care cube = unconditional fire),
+    # so the shortcut was redundant as well as wrong.
     for cube in term.minimized_cubes:
         active = [(term.witness_qubits[i], v) for i, v in enumerate(cube) if v is not None]
         if not active:
