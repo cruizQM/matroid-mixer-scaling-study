@@ -36,6 +36,11 @@ order:
 9. Direct validation of the actual construction (decomposition +
    cost-aware bounded-witness mixer) on two real networks, not just
    synthetic proxies calibrated to real anchor points.
+10. A cost-CAPPED decomposition that measures each subproblem's actual
+    cost and recursively re-splits anything too expensive, instead of
+    picking a zone size up front and hoping — guarantees every
+    synthetic-ladder seed stays under 500 CX, and gets very close (missing
+    by 1.6%, for a precisely diagnosed structural reason) on real data.
 
 Every numeric claim below was re-measured after every code fix mentioned
 in this document was already in place — two SEPARATE earlier drafts of
@@ -527,6 +532,73 @@ topology, not a synthetic stand-in.
 
 Reproduce: `python scripts/run_real_networks_hierarchical.py`.
 
+## 11. Cost-capped decomposition: guaranteeing the 500 CX target, not hoping for it
+
+Section 8's hierarchical decomposition, and section 6's flat version
+before it, both pick a `target_zone_size` up front (fixed, or
+density-scaled) and hope the result is cheap. It usually is, but not
+reliably: measuring the actual variance in section 6/8's own results
+found decomposed cost's coefficient of variation reaching 99% at some
+sizes (`long_log`, `n_nodes=100`) -- far WORSE than the whole-graph
+construction's own variance, which shrinks smoothly with size (55% down
+to 5%). The reason: decomposition trades one big averaging problem for
+`n_zones` small independent ones, and a single "unlucky" zone (one
+concrete case: 3,550 of a 3,566-CX subtotal from ONE zone of 19) can
+dominate a seed's total when there aren't yet enough zones for that to
+average out.
+
+**The fix: measure, don't guess.** Build each subproblem, transpile it,
+and check its ACTUAL cost against a threshold (`CX_THRESHOLD=500`). If
+it's already under threshold, it's a leaf, done. If not, partition IT
+further (same `zone_decomposition` machinery, at a smaller
+`target_zone_size`) and recurse on each of its own zones + assembly.
+Falls back to escalating `cost_alpha` (trading safety for cost, bounded
+-- never pushed to the point of inertness section 4 found) only for
+subgraphs too small to partition further (`n_nodes <= 4`) and still over
+threshold.
+
+**Result on the synthetic ladder: EVERY seed, both primary conditions,
+all 5 sizes, meets the threshold** — `results/cost_capped_decomposition_summary.csv`
+shows `all_seeds_met_threshold=True` on every single row, with mean
+feasible mass exactly 1.0 everywhere (no fallback cost-pressure
+escalation was needed on any instance tested). The previously-worst
+single subproblem (4,480 CX alone, one seed of `long_log`/`n_nodes=100`)
+now resolves to 26 verified-cheap leaves totaling 376 CX. This also
+fixes the variance problem as a side effect: capping every leaf means no
+single unlucky zone can dominate the total the way it did before.
+
+**Tested directly on the two real networks (not just synthetic proxies)**:
+
+| network | total CX | met 500 threshold? | safety |
+|---|---|---|---|
+| CIGRE MV | 274 | yes — didn't even need to split (1 leaf) | mean feasible mass 0.985 (real, if small, leakage — unlike every synthetic point, which hit exactly 1.0) |
+| IEEE33 | 508 | **no — 8 CX over (1.6%)** | mean feasible mass 1.0 (perfect) |
+
+CIGRE MV meets the target cleanly. IEEE33 misses by a small, precisely
+diagnosed margin, not a mystery: decomposing one level further bottoms
+out at a 4-node, 8-edge sub-assembly (a near-complete multigraph core —
+5 "extra" ties on just 4 supernodes) sitting exactly at the
+`n_nodes <= 4` irreducibility threshold. Direct check confirms
+`cost_alpha` genuinely cannot help there — cost stays at exactly 508 CX
+across every tested value from 0.01 to 5.0 — because even routing every
+candidate in that core through the approximate path
+(`exact_search_max_size=0`) rediscovers the IDENTICAL witnesses (same
+qubits, same widths: 0,1,1,2,2,2,2): a majority-vote rule over an
+already-perfectly-separable validity function just recovers the exact
+answer. There is no leak-vs-cost tradeoff being left on the table here —
+these candidates are already at the witness width where leak is exactly
+zero, and going narrower would introduce real leakage the search
+correctly declines even at high cost pressure. Closing this specific
+gap would need a smarter zone-CHOICE strategy (partitioning that avoids
+concentrating this density into one small piece in the first place) —
+a different lever than zone SIZE, witness search, or cost pressure,
+none of which touch it. Not attempted here.
+
+Reproduce: `python scripts/run_cost_capped_decomposition.py` (synthetic
+ladder), `python scripts/run_real_networks_hierarchical.py` (the two
+real networks, now with `cost_capped` as a third method alongside
+`exact_whole_graph` and `decomposed`).
+
 ## Methodology mistakes, made and caught
 
 Worth stating plainly, since catching it is part of what makes the
@@ -597,3 +669,14 @@ mandatory, not optional, for exactly this reason.
   repo's own already-validated `case33bw` extraction (`real_feeders.load_ieee33`)
   as a sanity check, but not independently re-verified against the
   original published papers for CIGRE MV or `mv_oberrhein`.
+- Section 11's cost-capped decomposition only tried varying zone SIZE
+  (and, as a last resort, cost pressure) to close the gap on IEEE33's
+  remaining 508-CX result -- a smarter zone-CHOICE strategy (which nodes
+  get grouped together, not just how many) was identified as the likely
+  next lever but not built or tested.
+- Section 11's `CX_THRESHOLD=500` was chosen to match this document's
+  own earlier NISQ-feasibility discussion (section 3), not re-derived
+  from a specific target device's current published error rates -- it's
+  a round, illustrative number in the same spirit as section 3's
+  estimates, not a claim that exactly 500 is the true cutoff for any
+  particular piece of hardware.

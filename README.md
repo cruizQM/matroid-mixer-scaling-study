@@ -131,6 +131,7 @@ python scripts/run_decomposed_cost_aware_ladder.py      # decomposition + bounde
 python scripts/run_best_of_both_ladder.py               # confirms decomposition dominates -- never loses a seed
 python scripts/run_hierarchical_decomposed_ladder.py    # density-aware recursive decomposition, for the still-hard conditions
 python scripts/run_real_networks_hierarchical.py        # this branch's actual construction, run directly on CIGRE MV + IEEE33
+python scripts/run_cost_capped_decomposition.py         # decomposition that MEASURES cost and re-splits over-threshold subproblems
 ```
 
 All scripts are deterministic (fixed random seeds); re-running should
@@ -342,9 +343,15 @@ the actual construction (not a synthetic proxy) was run directly on two
 real networks: on IEEE33, where the exact whole-graph construction is
 already known to fail outright (headline result 2), the decomposed
 cost-aware construction produces a complete, fully functional, 132-CX
-mixer. Full account, including both methodology mistakes made and caught
-along the way (worth reading for what that looked like, not just the
-corrected numbers): `docs/scaling-ladder-and-decomposition.md`.
+mixer. A final refinement — cost-CAPPED decomposition, which measures
+each subproblem's actual cost and recursively re-splits anything too
+expensive instead of picking a zone size and hoping — gets every single
+seed of the synthetic ladder under 500 CX with perfect safety, and comes
+within 1.6% of that same target on real data (CIGRE MV hits it cleanly;
+IEEE33 misses by 8 CX, traced to one small, genuinely irreducible dense
+core, not a search failure). Full account, including both methodology
+mistakes made and caught along the way (worth reading for what that
+looked like, not just the corrected numbers): `docs/scaling-ladder-and-decomposition.md`.
 
 ## What this does and doesn't demonstrate
 
@@ -441,10 +448,13 @@ scaling measurements.
   `run_best_of_both_ladder.py` (confirms decomposition never loses once
   it can be applied at all). `run_hierarchical_decomposed_ladder.py`
   (density-aware recursive decomposition for the still-hard conditions,
-  three iterations each empirically validated) and
+  three iterations each empirically validated),
   `run_real_networks_hierarchical.py` (this branch's actual construction
   run directly on `real_feeders.load_cigre_mv` -- new -- and the
-  existing `load_ieee33`) round it out.
+  existing `load_ieee33`), and `run_cost_capped_decomposition.py` (measures
+  each subproblem's actual CX cost and recursively re-splits anything over
+  a threshold, rather than picking a zone size and hoping -- 100% success
+  on the synthetic ladder, tested on both real networks too) round it out.
 - `results/` — one CSV/plot pair per script above, all generated, none
   hand-edited; `*_before_minimization.*` files are the pre-fix numbers,
   kept for the before/after comparison in `docs/circuit-validity.md`;
