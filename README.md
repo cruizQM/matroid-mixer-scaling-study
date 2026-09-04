@@ -118,7 +118,11 @@ python scripts/plot_decomposition_by_qubits.py          # re-plots the above by 
 python scripts/plot_illustrations.py                    # explanatory diagrams (not measurements)
 python scripts/verify_leakage_trace.py                  # correctness check for the bounded-witness mixer's tooling
 python scripts/tie_density_sweep.py                     # a second witness-blowup axis: tie density (see docs/bounded-witness-mixer.md)
-python scripts/run_bounded_witness_safety_survey.py     # real-scale safety survey for the bounded-witness mixer
+python scripts/run_bounded_witness_safety_survey.py     # real-scale safety + cost survey for the bounded-witness mixer
+python scripts/measure_truncated_mixer.py               # circuit-cost investigation: truncated mixer's own cost trend + vs. exact
+python scripts/truncated_witness_cap_sweep.py           # witness-cap vs. cost/safety tradeoff (density family)
+python scripts/truncated_witness_cap_sweep_longrange.py # same tradeoff, generalized to the long-range family + real scale
+python scripts/truncated_mixer_search_refinement.py     # cap=0/1 + the cost-aware search fix (cost_alpha)
 ```
 
 All scripts are deterministic (fixed random seeds); re-running should
@@ -268,20 +272,27 @@ standalone technical reference (matroid theory, exact circuit derivation,
 verification arguments) if you want the mechanism independent of the
 narrative.
 
-## Headline result 3: a second witness-blowup axis, and a bounded alternative to decomposition
+## Headline result 3: a second witness-blowup axis, and a bounded alternative to decomposition — but only once its own circuit cost was checked
 
 Headline result 2 traced the whole-graph witness bound's failure on real
-data to tie *range*, and fixed it with zone decomposition. Two more
-pieces, developed on a downstream project and ported back onto this
-branch: a **second, independent axis** — tie *density* alone, on this
-repo's own short-range nearest-tie graph family, unchanged in every other
-respect — also breaks the same bound; and an **alternative to
+data to tie *range*, and fixed it with zone decomposition. This section
+covers three more pieces, developed on a downstream project and ported
+back onto this branch: a **second, independent axis** — tie *density*
+alone, on this repo's own short-range nearest-tie graph family, unchanged
+in every other respect — also breaks the same bound; an **alternative to
 decomposition** for cases where a bounded witness is preferred to
 splitting the problem into zones — `truncated_mixer.py` accepts a
 fixed-size witness cap and the resulting (measured, not assumed) leakage,
-instead of dropping a candidate exchange outright. Full account, numbers,
-and the real correctness bug this second construction's cross-checking
-caught in code the previous headline results already depended on: `docs/bounded-witness-mixer.md`.
+instead of dropping a candidate exchange outright; and, once the first
+version of that alternative's actual circuit cost was measured (not
+assumed) rather than just its connectivity and leakage — this repo's own
+standard metric, headline results 1 and 2 are built around it — it turned
+out to cost **up to 38x more than necessary**, for reasons a follow-up
+investigation traced and mostly fixed (a cost-aware search objective,
+`cost_alpha`, now the construction's default). Full account, numbers, the
+real correctness bug the second construction's cross-checking caught in
+code the previous headline results already depended on, and the
+circuit-cost investigation and fix: `docs/bounded-witness-mixer.md`.
 
 ## What this does and doesn't demonstrate
 
@@ -316,9 +327,11 @@ scaling measurements.
   the real-topology failure and its root cause, the decomposition fix and
   its scaling validation, and the circuit-cost investigation.
 - `docs/bounded-witness-mixer.md` — a second, density-driven witness-blowup
-  axis, and the bounded-witness mixer as an alternative to decomposition:
-  construction, real-scale safety survey, and a correctness bug the
-  cross-check caught in shared code.
+  axis, the bounded-witness mixer as an alternative to decomposition
+  (construction, a correctness bug the cross-check caught in shared code,
+  real-scale safety survey), and the circuit-cost investigation that
+  found the first version of that construction cost up to 38x more than
+  necessary, plus the cost-aware search fix that mostly closed the gap.
 - `scripts/` — synthetic sweep: `graphs.py`, `mixer.py`, `measure.py`,
   `run_scaling_study.py`, `plot.py`, `verify_correctness.py`. Real
   topology: `real_feeders.py`, `run_real_feeder_validation.py`,
@@ -332,11 +345,18 @@ scaling measurements.
   `plot_illustrations.py` generates the explanatory diagrams (not
   measurements). Bounded-witness mixer: `random_trees.py` (Wilson's
   algorithm + exchange-graph-walk sampling), `truncated_mixer.py`
-  (bounded-witness construction), `leakage_trace.py` (exact + sparse
+  (bounded-witness construction, including the cost-aware search --
+  `cost_alpha` -- described below), `leakage_trace.py` (exact + sparse
   danger-mass tracing), `verify_leakage_trace.py` (correctness check for
   all three), `tie_density_sweep.py` (the density-driven witness-blowup
-  axis), `run_bounded_witness_safety_survey.py` (real-scale safety
-  survey).
+  axis), `run_bounded_witness_safety_survey.py` (real-scale safety +
+  circuit-cost survey). Circuit-cost investigation:
+  `measure_truncated_mixer.py` (own cost trend + head-to-head vs. the
+  exact construction on the density family), `truncated_witness_cap_sweep.py`
+  / `truncated_witness_cap_sweep_longrange.py` (witness-cap vs. cost/safety,
+  density family and long-range family + real scale), and
+  `truncated_mixer_search_refinement.py` (cap=0/1 instability check, and
+  the `cost_alpha` sweep that set the construction's current default).
 - `results/` — one CSV/plot pair per script above, all generated, none
   hand-edited; `*_before_minimization.*` files are the pre-fix numbers,
   kept for the before/after comparison in `docs/circuit-validity.md`;

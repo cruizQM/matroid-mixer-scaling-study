@@ -3,7 +3,16 @@ is no longer tractable, how often `truncated_mixer.py`'s bounded-witness
 construction actually loses feasible probability mass on a genuine
 starting-tree trajectory -- as opposed to the per-term majority-vote
 leakage RATE alone (`TruncatedTermInfo.leakage_rate`), which is a property
-of the abstract validity function, not of any specific run.
+of the abstract validity function, not of any specific run. Also reports
+the resulting circuit's transpiled cost (CX count, depth) at each size --
+added after the circuit-cost investigation in
+`docs/bounded-witness-mixer.md` found `build_truncated_witness_mixer`'s
+original `cost_alpha=0.0` default produced circuits 16-38x more
+expensive than necessary; this script now reflects that default's fix
+(`cost_alpha=0.01`), so cost and safety are reported together as ONE
+consistent picture of the construction actually being recommended,
+instead of measuring safety alone and leaving cost as a separate,
+easy-to-miss finding the way the first version of this script did.
 
 ## Why build on the long-range-tie generator, not the nearest-tie one
 
@@ -51,8 +60,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from qiskit import transpile
+
 from graphs import generate_feeder_graph_long_range_ties
 from leakage_trace import final_feasible_mass
+from measure import TRANSPILE_BASIS
+from mixer import mixer_circuit
 from random_trees import random_spanning_tree, random_walk_exchange_sample
 from truncated_mixer import build_truncated_witness_mixer
 
@@ -85,6 +98,14 @@ def run_one(n_nodes: int, seed: int) -> dict:
     )
     build_elapsed = time.perf_counter() - t0
 
+    if truncated.construction.terms:
+        qc = mixer_circuit(truncated.construction, beta=BETA)
+        tqc = transpile(qc, basis_gates=TRANSPILE_BASIS, optimization_level=1)
+        op_counts = tqc.count_ops()
+        cx_count, depth = op_counts.get("cx", 0), tqc.depth()
+    else:
+        cx_count, depth = 0, 0
+
     t1 = time.perf_counter()
     rng = np.random.default_rng(seed * 1000 + 2)
     unsafe = 0
@@ -110,6 +131,8 @@ def run_one(n_nodes: int, seed: int) -> dict:
         "mean_term_leakage_rate": round(truncated.mean_leakage_rate, 4),
         "max_term_leakage_rate": round(truncated.max_leakage_rate, 4),
         "fully_connected_on_walk_sample": truncated.construction.fully_connected,
+        "cx_count": cx_count,
+        "depth": depth,
         "n_starting_trees_surveyed": N_STARTING_TREES,
         "n_unsafe": unsafe,
         "unsafe_rate": round(unsafe / N_STARTING_TREES, 4),
@@ -149,6 +172,8 @@ def main() -> None:
             "worst_feasible_mass_min": round(min(r["worst_feasible_mass"] for r in group), 4),
             "mean_feasible_mass_mean": round(statistics.mean(r["mean_feasible_mass"] for r in group), 4),
             "mean_term_leakage_rate_mean": round(statistics.mean(r["mean_term_leakage_rate"] for r in group), 4),
+            "cx_count_mean": round(statistics.mean(r["cx_count"] for r in group), 0),
+            "depth_mean": round(statistics.mean(r["depth"] for r in group), 0),
         })
     with open(SUMMARY_CSV_PATH, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(summary_rows[0].keys()))
