@@ -1,35 +1,69 @@
 # Matroid basis-exchange QAOA mixer: scaling study
 
-**Question**: for the constraint "the selected edges form a spanning tree
-of the graph" (a basis of its graphic matroid), does a QAOA mixer that
-preserves that constraint exactly — rather than enforcing it with a penalty
-term in the cost function — compile into a circuit whose gate count and
-depth scale favorably with graph size, for sparse graphs resembling real
-distribution feeders? This is narrower than general worst-case graphs,
-where basis-exchange move sets can blow up exponentially; it is the graph
-class relevant to feeder reconfiguration, where the network is sparse
-(a radial backbone plus a small number of tie switches) and close to
-planar. A constraint-preserving mixer restricts QAOA's search to the
-feasible subspace directly, instead of relying on a penalty coefficient
-in the cost Hamiltonian to discourage infeasible states — trading a
-larger, structured mixer circuit for a smaller effective search space and
-no penalty-weight tuning. This repo answers whether that trade is cheap
+## The question
+
+For the constraint "the selected edges form a spanning tree of the graph"
+(a basis of its graphic matroid), does a QAOA mixer that preserves that
+constraint exactly — rather than enforcing it with a penalty term in the
+cost function — compile into a circuit whose gate count and depth scale
+favorably with graph size, for sparse graphs resembling real distribution
+feeders? And if the direct answer turns out to be "not on real topology,
+not without help": can something be built that still solves the problem
+exactly, cheaply enough to matter on both fault-tolerant and near-term
+(NISQ) hardware?
+
+This is narrower than general worst-case graphs, where basis-exchange
+move sets can blow up exponentially; it is the graph class relevant to
+feeder reconfiguration, where the network is sparse (a radial backbone
+plus a small number of tie switches) and close to planar. A
+constraint-preserving mixer restricts QAOA's search to the feasible
+subspace directly, instead of relying on a penalty coefficient in the
+cost Hamiltonian to discourage infeasible states — trading a larger,
+structured mixer circuit for a smaller effective search space and no
+penalty-weight tuning. This repo answers whether that trade is cheap
 enough, empirically, to be worth making for this problem class.
 
-**Answer, from what's measured here**: yes, on a synthetic sparse-feeder
-family — and, once decomposed into zones, also on the real, published
-IEEE 33-bus test feeder, with the decomposition's benefit confirmed to
-hold as network size grows. Getting there also surfaced and fixed real
-problems along the way — a correctness bug, a real-topology scaling
-failure, and a circuit-cost inefficiency — rather than finding a clean
-result on the first try; how they were found and fixed is part of the
-evidence, covered below and in full in `docs/circuit-validity.md`.
+**Short answer**: not for free. The direct construction works cleanly on
+a synthetic sparse-feeder family, but fails outright on real, published
+topology (the IEEE 33-bus feeder) — genuinely infeasible witness sizes,
+not a tunable search limit. Two things fix it: **zone decomposition**
+(splits the constraint into small, exactly-solvable pieces, provably
+lossless) and a **cost-aware bounded-witness mixer** (bounds circuit cost
+directly, at a small, measured leakage cost). Combined, and refined
+further under an escalating ladder of increasingly realistic assumptions,
+they produce a construction that is exact and NISQ-plausible on real
+feeder topology — validated directly on two real networks, not just
+synthetic proxies.
 
-## Background: what "feasible" means here
+## The strategy, at a glance
+
+1. **Establish the baseline** on synthetic data: does the exact
+   construction scale at all, under the simplest realistic assumptions?
+   (Results, part 1, below.)
+2. **Stress-test it against real topology.** It breaks — trace *why*
+   before reaching for a fix.
+3. **Fix it two independent ways**, each solving a different piece of the
+   problem: zone decomposition (splits the *constraint*, exact) and a
+   bounded-witness mixer (bounds *cost* directly, approximate but
+   measured). Combine them.
+4. **Stress-test the fix** under an escalating ladder of more realistic
+   assumptions (tie placement, tie-count growth) calibrated to, and later
+   checked against, real feeder data — including a real correctness bug
+   and a dead end found and caught along the way, not smoothed over.
+5. **Push cost down further** once the fix works, specifically to reach
+   NISQ-plausible gate counts, not just "scales better than before."
+6. **Validate the whole thing directly on real networks** — not only the
+   synthetic families every earlier step was calibrated to.
+
+Each numbered step below links to the full technical account in `docs/`;
+this document is the narrative and the numbers that matter for deciding
+whether to trust the result, not the complete derivation.
+
+## Background: what "feasible" means here, and why some ties are worse than others
 
 A distribution feeder has more switchable connections than it strictly
 needs to reach every load: a normally-closed backbone plus a small number
-of normally-open "tie" switches, held open in everyday operation and
+of normally-open **tie** switches, held open in everyday operation and
 closed only temporarily (e.g. to reroute power around a fault). The
 network must stay **radial** — every node reached, no loops — for
 protection and fault-isolation reasons.
@@ -40,13 +74,7 @@ Encoded directly: qubit `i` = 1 iff switch `i` is closed. A configuration
 is feasible iff its closed-switch set is a spanning tree of the network
 graph — exactly a basis of the network's graphic matroid, shown above on
 a small example graph (14 nodes, one candidate tie switch, reused as the
-running example in the figures below). This repo studies whether a QAOA
-mixer that only ever proposes moves between one spanning tree and
-another — never touching an infeasible configuration — compiles into a
-circuit that scales well with network size, as an alternative to
-enforcing the same constraint with a penalty term in the cost function.
-
-## What we're measuring, and why
+running example in the figures below).
 
 A QAOA mixer's job is to move probability between states without ever
 leaving the feasible set. Concretely here, that means one operation
@@ -59,48 +87,320 @@ Matroid theory guarantees moves like this, applied one at a time, are
 enough to reach any feasible configuration from any other — so the
 *entire* mixer is built from a set of these exchanges, one small circuit
 term per move. That would be a trivial circuit-design problem if any
-switch pair could be exchanged freely — but it can't: the "Background"
-example above already showed that closing a switch without also opening
-the right one produces a loop, not another tree. Which switch has to open
-depends on the rest of the network's *current* configuration, not just
-the two switches being touched, so each exchange's circuit term generally
-has to be **conditioned** on other qubits to fire only when the move is
-actually valid — never on the states where it would produce a loop.
+switch pair could be exchanged freely — but it can't: closing a switch
+without also opening the right one produces a loop, not another tree.
+Which switch has to open depends on the rest of the network's *current*
+configuration, not just the two switches being touched, so each
+exchange's circuit term generally has to be **conditioned** on other
+qubits to fire only when the move is actually valid.
+
+The qubits an exchange's term depends on are exactly the *other* tree
+edges on its tie switch's **fundamental cycle** — call this set of qubits
+the exchange's **witness**. A short cycle means a small witness; a long
+one means a large witness, and a large witness means an expensive,
+deeply-controlled gate.
+
+![A tie edge's fundamental cycle, short vs long](results/illustration_fundamental_cycle.png)
+
+*(synthetic — illustrative, same running example graph, tie switch choice
+changed from nearest-neighbor to long-range, `scripts/plot_illustrations.py`)*
+2 witness qubits on the left, 8 on the right, in this small example. Real
+tie switches are deliberately placed to link *distant* parts of a network
+for redundancy — closer to the right panel than the left — which is
+exactly what makes this problem harder on real topology than it looks on
+a graph where ties happen to be short-range.
 
 **This is the actual question this repo measures**: how much does that
 conditioning cost, in gates and circuit depth, and does that cost grow or
-stay manageable as the network gets larger? A mixer whose per-move
-conditioning cost explodes with network size is a mixer that doesn't
-scale, independent of anything else about QAOA.
+stay manageable as the network gets larger and as tie placement gets more
+realistic? A mixer whose per-move conditioning cost explodes is a mixer
+that doesn't scale, independent of anything else about QAOA.
 
-**Why this matters beyond this repo**: keeping that cost bounded, rather
-than exploding, is what would let QAOA run at the network sizes where
-quantum computing could eventually offer an advantage over classical
-methods on constrained problems like this one. Classical formulations of
-the same radiality requirement still have to encode it explicitly — as
-penalty terms in an objective, or as constraints a solver enforces —
-while a constraint-preserving mixer builds feasibility directly into the
-algorithm's dynamics instead, a structurally different way of handling
-the same requirement that this repo tests for cost, not yet for solution
-quality. That's the promise a bounded-cost result is a *precondition*
-for, not proof of — see "What this does and doesn't demonstrate" below
-for the boundary between the two.
+**Why this matters beyond this repo**: keeping that cost bounded is what
+would let QAOA run at network sizes where quantum computing could
+eventually offer an advantage over classical methods on constrained
+problems like this one. Classical formulations of the same radiality
+requirement still have to encode it explicitly — as penalty terms in an
+objective, or as constraints a solver enforces — while a
+constraint-preserving mixer builds feasibility directly into the
+algorithm's dynamics instead. That's the promise a bounded-cost result is
+a *precondition* for, not proof of — see "What this does and doesn't
+demonstrate" below for the boundary between the two.
 
-What follows tests the cost question directly — first on a synthetic
-sparse-feeder family, no decomposition involved (Headline result 1), then
-stress-tested against real, published topology, where the same
-undecomposed approach breaks and decomposition turns out to be the fix
-(Headline result 2).
+## Techniques used, and what problem each one solves
 
-## Scope
+In the order they're needed to understand the results, not the order
+they were built (the build order — including two real detours — is in
+"Headline result 4" of `docs/scaling-ladder-and-decomposition.md`, kept
+there as part of the evidence, not hidden here).
 
-This repo contains the measurement methodology and results for this one
-question only. It does **not** include a production mixer-compilation
-library, does not cover other constraint classes, and does not include
-hardware execution, QAOA solution quality, or a classical baseline
-comparison — see `methodology.md` for the precise boundary of what was
-measured, and "What this does and doesn't demonstrate" below for how that
-boundary matters when citing this work.
+**1. Exact matroid mixer (`mixer.py`, `build_matroid_mixer`).** For each
+candidate exchange, brute-force search for the smallest witness that
+makes the term's firing rule exactly correct (no leakage outside the
+feasible set, verified against the true validity function, not assumed).
+Cheap and exact when witnesses stay small — which they do on a synthetic
+family where ties are short-range by construction, but not in general:
+**tie range** (long fundamental cycles) and, independently, **tie
+density** (many ties even at short range) both push true minimal witness
+sizes past any practical search cap, on real topology and on a
+density-focused synthetic family respectively (`docs/bounded-witness-mixer.md`'s
+Finding 1). When that happens, the exact construction doesn't get
+gradually more expensive — it gives up on candidates outright
+(`dropped_candidates` climbs to 51-95%) and the resulting mixer stops
+being fully connected.
+
+**2. Zone decomposition (`zone_decomposition.py`) — fixes the *range*
+failure.** Don't build one circuit for the whole network: partition into
+zones via a min tie-line-cut, solve each zone's matroid mixer
+independently (small qubit count each), plus one small assembly mixer
+over the contracted zone graph. Guaranteed **exact** by graphic-matroid
+contraction/deletion (the union of every zone's spanning tree plus the
+assembly problem's spanning tree is provably a spanning tree of the whole
+graph) — this is a structural fix to the *constraint*, not an
+approximation.
+
+![A graph partitioned into zones, plus the contracted assembly problem](results/illustration_decomposition.png)
+
+*(synthetic — illustrative example, 24 nodes)* it works specifically
+*because* the range failure is local to individual long-range ties: keep
+each zone small enough that any tie edge still inside it stays
+short-range-like, and push the genuinely long-range connections out to
+one small assembly problem instead of forcing the whole graph to absorb
+their cost.
+
+**3. Bounded-witness mixer (`truncated_mixer.py`) — bounds *cost*
+directly, at a measured leakage cost.** An alternative (or complement) to
+decomposition for cases where a fixed witness cap is preferred to
+splitting the problem into zones: instead of dropping a candidate
+exchange outright when no small *exact* witness exists, search for a
+witness of a fixed, capped size using a **majority-vote** validity rule,
+and accept the resulting leakage — provided it's measured, not assumed,
+and stays small. `leakage_trace.py` traces the actual probability mass
+this costs on real trajectories (exactly, not sampled), separately from
+the abstract leakage rate the search itself optimizes.
+
+**4. Cost-aware search (`cost_alpha`) — fixes a real 38x inefficiency.**
+The first version of (3) picked witnesses by leakage alone, and since
+adding a witness qubit can only ever weakly *reduce* leakage, the search
+had every incentive to walk to the cap every time — 17,386–32,520 CX
+gates measured at just 15-17 qubits, more than a real 37-qubit
+decomposed feeder circuit. `cost_alpha` adds a cost penalty to the search
+objective directly, closing most of that gap; it is this construction's
+validated default (`docs/bounded-witness-mixer.md`). A later
+per-term-adaptive version of this same idea looked like a further
+improvement on an initial sweep, and was **not** once properly
+re-validated — a real dead end, kept in the record
+(`docs/scaling-ladder-and-decomposition.md` §5) rather than quietly
+dropped.
+
+**5. Hierarchical (density-aware) decomposition** — for cases where the
+*assembly* graph from step 2 is itself still large or dense: recurse zone
+decomposition on it, scaling `target_zone_size` inversely to the current
+graph's measured density rather than a fixed schedule (found, by direct
+comparison, to beat both a fixed recursive schedule and naive
+zone-shrinking — `docs/scaling-ladder-and-decomposition.md` §8).
+
+**6. Cost-capped decomposition — guarantees a cost target instead of
+hoping for one.** Steps 2 and 5 both pick a zone size up front and hope
+the resulting cost is acceptable; it usually is, but decomposed cost
+turns out to have much higher seed-to-seed variance than whole-graph cost
+(coefficient of variation up to 99% at some sizes — decomposition trades
+one big averaging problem for many small independent ones, and a single
+"unlucky" zone can dominate a seed's total). The fix: build each
+subproblem, transpile it, check its **actual** cost against a threshold,
+and recursively re-split anything over it — measure, don't guess. Gets
+**every seed of the synthetic ladder under 500 CX**, and comes within
+1.6% of that target on real data (`docs/scaling-ladder-and-decomposition.md` §11).
+
+## Why the ladder is shaped this way, and why log growth
+
+Validating steps 2-6 once, on one real anchor point, isn't enough to
+trust the result generally — so this repo stress-tests them across an
+**escalating ladder** of increasingly realistic assumptions, varied along
+two axes, both independently calibrated to the one real anchor point this
+repo started with (5 ties at the 33-bus feeder):
+
+- **tie placement**: short-range (nearest-tie, headline-result-1's
+  family) vs. long-range (the family the real-feeder failure and the
+  bounded-witness safety survey are built on).
+- **tie-count growth**: log (`round(1.43*ln(n))`, mild) vs. linear
+  (`round(0.1515*n)`, aggressive).
+
+**This choice was checked against real data, not just assumed.** Three
+real/real-benchmark networks (CIGRE MV, IEEE 33-bus, and a real German MV
+network, `mv_oberrhein`, via `pandapower.networks`), spanning a 12x size
+range:
+
+| network | n_bus | n_ties | ties/n_bus |
+|---|---|---|---|
+| CIGRE MV | 15 | 3 | 0.200 |
+| case33bw (IEEE33) | 33 | 5 | 0.152 |
+| mv_oberrhein | 179 | 6 | 0.034 |
+
+The ratio drops 6x from smallest to largest — flatly inconsistent with
+linear growth (which would keep it roughly constant), reasonably
+consistent with log growth (`ties/log(n_bus)` comes out to 1.11, 1.43,
+1.16 — much tighter). Real tie *range* was checked the same way: real
+ties consistently span 33-45% of network diameter, matching this repo's
+long-range generator far better than its short-range one (which gets
+*worse*, not better, with scale). **`CONDITIONS` therefore defaults to
+the two log-growth conditions**; linear growth is kept as an explicit,
+fully reproducible stress test, not deleted, but no longer presented as
+equally realistic (`docs/scaling-ladder-and-decomposition.md` §9 has the
+full check, including honest caveats — 3 points spanning one order of
+magnitude rules out linear but doesn't fit an actual growth law).
+
+## Results, part 1: the exact construction (what a fault-tolerant device could run today)
+
+The exact construction (technique 1) is the one with no approximation and
+no leakage risk from splitting the problem — the number relevant to
+"does this work at all, with unlimited circuit budget."
+
+**Synthetic baseline.** Built directly on a synthetic sparse-feeder
+family, `k_ties` held fixed as the network grows:
+
+![Mixer circuit CX count and depth vs. instance size](results/scaling_plot.png)
+
+Measured across 26 instance sizes (`n_qubits` 10–35), 5 seeds per size.
+**Within this range, cost trends flat-to-*decreasing* with size** — the
+network gets sparser as it grows (same few ties spread across more
+nodes), so there are fewer, cheaper exchanges to condition. This trend is
+a property of the flat-tie-count assumption specifically, not the
+construction in general: under log-scaled tie-count growth (the
+realistic model, per above), the exact construction's cost instead
+**increases** — 3.4x more on average, 5.8x more at the 33-node
+calibration point (`docs/scaling-ladder-and-decomposition.md` §1).
+
+**Real topology (IEEE 33-bus feeder).** Built the same way, directly on
+the real, published feeder (Baran & Wu 1989, `n_nodes=33`, `n_qubits=37`,
+via `pandapower.networks.case33bw`): **it fails.** 91% of candidate
+exchanges have no witness of any practical size, and the resulting mixer
+is not fully connected — a completeness gap, not a performance number
+(`results/real_feeder_results.csv`). Not a search-cap artifact either:
+the witness the whole graph would actually need spans dozens of qubits,
+measured directly.
+
+**Zone decomposition recovers exactness, and stays cheap as size grows.**
+On the same real 33-bus graph, every zone/assembly subproblem is exactly
+leak-free with witness size 0-4, vs. 22-34 on the whole graph
+(`results/zone_decomposition_results.csv`). On a synthetic family
+reproducing the real failure mode at controllable sizes (12 seeds/size,
+`n_nodes` 10-120):
+
+![Whole-graph vs. zone-decomposed witness requirement](results/decomposition_scaling_plot.png)
+
+The whole-graph requirement grows roughly linearly; the decomposed
+requirement (fixed zone size) stays flat around 3 — the central claim of
+the decomposition fix. Re-plotted by qubit count for direct comparison
+against the synthetic baseline above:
+
+![Whole-graph vs. zone-decomposed witness requirement, by qubit count](results/decomposition_scaling_by_qubits_plot.png)
+
+**On a second real network (CIGRE MV, 15 buses, 3 ties)**: exact
+whole-graph construction succeeds here (small enough graph), at 16 terms,
+12,220 CX, 24,245 depth — decomposition still cuts that 3.3x, to 3,668 CX
+(`docs/scaling-ladder-and-decomposition.md` §10).
+
+**Full account**, including the failure's root cause, a first attempted
+fix that was insufficient, and a follow-up circuit-cost investigation:
+`docs/circuit-validity.md`. `docs/mixer-construction.md` is the
+standalone technical reference (matroid theory, exact circuit derivation,
+verification arguments).
+
+## Results, part 2: the NISQ-ready construction (decomposition + cost-aware bounded-witness mixer)
+
+Exactness alone doesn't make a circuit runnable soon: rough NISQ
+feasibility arithmetic (`fidelity ≈ (1-p)^N_CX`, published two-qubit gate
+fidelity ranges) shows even the flat-decomposed real-network numbers
+above are well outside a plausible regime once tie count and range are
+modeled realistically:
+
+| CX count | best-case trapped-ion (p=0.001) | typical superconducting (p=0.005) |
+|---|---|---|
+| 100 | 90% | 61% |
+| 500 | 61% | 8% |
+| 1,000 | 37% | 0.7% |
+| 5,000 | 0.7% | ~0 |
+| 13,000 | ~10⁻⁶ | ~0 |
+
+**The escalating ladder result, once made cost-aware (techniques 3+4)**:
+cost roughly plateaus by `n_nodes=60` rather than growing further; tie
+*placement* (short vs. long range) drives the cost level far more than
+tie-count *growth rate* (log vs. linear) does; the mixer stays fully
+connected at every point tested
+(`docs/scaling-ladder-and-decomposition.md` §2). Getting here also
+surfaced a real bug — a search objective that can let most of a mixer's
+terms silently stop firing at all, producing a circuit that *looks* safe
+because it has stopped being a mixer — caught by tracking active vs.
+inert witnesses explicitly, and a dead end (adaptive per-term cost
+pressure) that looked like a further win before that fix and wasn't
+after it. Both are covered in full, not smoothed over, in
+`docs/scaling-ladder-and-decomposition.md` §4-5.
+
+**Decomposition (technique 2) dominates almost everywhere it applies**
+once combined with the cost-aware mixer: 5.6x-46.7x cheaper than the
+whole-graph cost-aware construction, winning every single seed at every
+size ≥ 30 nodes, for both log-growth conditions (§6). Hierarchical
+decomposition (technique 5) pushes the hardest remaining condition
+further: 1.46-1.59x cheaper than flat decomposition at real scale (§8).
+
+**Cost-capped decomposition (technique 6) is the current recommendation**
+— it doesn't just do well on average, it guarantees the target:
+
+| condition | result |
+|---|---|
+| synthetic ladder, both log-growth conditions, all 5 sizes, all seeds | **100% under 500 CX**, mean feasible mass exactly 1.0 |
+
+**Validated directly on real networks — not just synthetic proxies:**
+
+| network | construction | CX | result |
+|---|---|---|---|
+| CIGRE MV (15 buses, 3 ties) | exact whole-graph | 12,220 | connected, exactly leak-free |
+| CIGRE MV | decomposed | 3,668 | 3.3x cheaper |
+| CIGRE MV | **cost-capped decomposed** | **274** | meets 500-CX target cleanly; mean feasible mass 0.985 |
+| IEEE33 (33 buses, 5 ties) | exact whole-graph | 96 | **573/597 candidates dropped, disconnected — fails** |
+| IEEE33 | decomposed | 132 | fully functional; mean feasible mass 1.0 |
+| IEEE33 | **cost-capped decomposed** | **508** | 8 CX over target (1.6%); mean feasible mass 1.0 (perfect) |
+
+IEEE33's small miss is not a mystery or a search failure: it's traced to
+one small (4-node), genuinely irreducible dense multigraph core, where
+neither cost pressure nor search-cap changes can help because those
+candidates are already at the zero-leak witness width — there's no
+cost/safety tradeoff left to spend. Closing it would need a smarter zone-
+*choice* strategy (which nodes get grouped together, not just how many),
+identified but not attempted (`docs/scaling-ladder-and-decomposition.md` §11).
+
+**Full account**, including both real methodology mistakes made and
+caught along the way (worth reading for what that looked like, not just
+the corrected numbers): `docs/scaling-ladder-and-decomposition.md`.
+`docs/bounded-witness-mixer.md` covers the density-failure axis, the
+bounded-witness construction itself, and the cost-aware search fix in
+full detail.
+
+## What this does and doesn't demonstrate
+
+This repo shows the mixer **construction** is correct and scales — both
+exactly (fault-tolerant-relevant) and, via decomposition and cost-capping,
+cheaply enough for a plausible NISQ target (real-topology-relevant). It
+does **not** show a quantum algorithm outperforming a classical baseline:
+there is no cost-Hamiltonian/oracle integration, no QAOA execution, no
+classical solver comparison, and no test of the iterative boundary
+coupling (an ADMM-style loop) this kind of decomposition would need for
+the actual optimization objective — only the radiality constraint,
+tested here, decomposes exactly. Treat this as evidence the algorithm is
+buildable and scalable, a precondition for an advantage claim, not the
+claim itself. See `methodology.md` for the precise boundary of what was
+measured.
+
+## A correctness bug found and fixed during this study
+
+An early version of the mixer circuit was **wrong**: an unconditional
+swap gate leaked probability outside the feasible subspace on roughly
+half the instances tested, caught by direct verification against the
+exact circuit unitary rather than assumed safe. The fix — witness-qubit
+conditioning, found by direct search — is in `docs/circuit-validity.md`.
+`scripts/verify_correctness.py` re-runs this check independently of the
+scaling measurements.
 
 ## How to reproduce
 
@@ -138,242 +438,14 @@ All scripts are deterministic (fixed random seeds); re-running should
 reproduce the committed files in `results/` exactly, modulo `qiskit`/
 `networkx` version differences in transpilation.
 
-## Headline result 1: synthetic scaling sweep
+## Scope
 
-The most basic version of the cost question above, first: build the
-mixer directly on a synthetic sparse-feeder family across a growing range
-of sizes, and measure the transpiled circuit's CX count and depth at each
-size.
-
-![Mixer circuit CX count and depth vs. instance size](results/scaling_plot.png)
-
-Measured across 26 instance sizes (`n_qubits` 10–35) and 5 random graph
-seeds per size — `results/scaling_results.csv` (per run) /
-`scaling_summary.csv` (per-size mean/min/max). **Takeaway**: within this
-range, on this synthetic sparse-feeder graph family, mixer circuit cost
-does not grow with instance size — mean and worst-case CX count and depth
-trend flat-to-*decreasing*. Not extrapolated past `n_qubits=35`.
-
-**Why cost decreases, not just stays flat**: the number of tie switches
-(`k_ties`) is held fixed as the network grows, so the graph gets sparser
-as `n_nodes` increases — each tie switch's local neighborhood has fewer
-alternative ways to reconnect around it as there's more network to spread
-the same few tie switches across. That shows up directly in the per-seed
-data: at the smallest tested size (`n_qubits=10`), 3 of 5 random seeds
-needed an exchange conditioned on 2 other switches — the most expensive
-case in this sweep, up to 1,556 CX; at the largest (`n_qubits=35`), only
-1 of 5 did, topping out at 576 CX. Larger, sparser instances have both
-fewer exchanges that need conditioning at all, and less conditioning
-where it's still needed — see `results/scaling_results.csv` for the full
-per-seed breakdown.
-
-## Headline result 2: real topology needs decomposition, but then it works — and keeps working as the network grows
-
-**The real data**: the IEEE 33-bus distribution test feeder (Baran & Wu,
-1989) — `n_nodes=33` (buses), `n_qubits=37` (candidate switches: 32
-normally-closed + 5 normally-open tie switches), loaded via
-`pandapower.networks.case33bw`
-([pandapower documentation](https://pandapower.readthedocs.io/en/latest/networks/power_system_test_cases.html)).
-Small by qubit-count standards, but real, published topology rather than
-another synthetic instance — that's what makes it a meaningful stress
-test of headline result 1's approach, not its size. **Only one real
-instance exists at one fixed size** — every result below marked
-"(synthetic)" uses a generator built to reproduce the real failure mode
-at controllable sizes, since there's no way to sweep network size with a
-single real data point; results marked "(real data)" are measured
-directly on the actual 33-bus graph.
-
-Headline result 1 succeeded on a synthetic graph family whose tie edges
-are, by construction, the *geometrically nearest* candidate pairs — short
-fundamental cycles, by design. Real published feeders aren't necessarily
-built that way: tie switches exist specifically to link distant parts of
-a network for reconfiguration redundancy. Does the same whole-graph
-construction that just worked still hold up on real, published topology?
-
-![A tie edge's fundamental cycle, short vs long](results/illustration_fundamental_cycle.png)
-
-*(synthetic — illustrative example, not the 33-bus graph itself)* the
-same running example graph from "Background" above, but with the tie
-switch choice changed from nearest-neighbor to long-range (same node
-positions, `scripts/plot_illustrations.py`). Why that's a problem, made
-concrete: recall from "What we're measuring" that an exchange's circuit
-term generally has to be conditioned on other qubits, since firing on the
-wrong tree configuration produces a loop. The specific qubits it depends
-on are exactly the *other* tree edges on its tie switch's fundamental
-cycle — call this set of qubits the exchange's **witness**; conditioning
-the circuit term on them (instead of firing unconditionally) is what
-keeps every firing safe. A short cycle means a small witness — 2 qubits
-on the left panel above. A long cycle means a large one — 8 qubits on the
-right, in this small example. Since real tie switches are deliberately
-long-range (redundancy across distant parts of a network, not between
-adjacent switches), the graphs this construction actually has to handle
-on real data look like the right panel, not the left.
-
-**It doesn't hold up (real data).** Built directly on the real, published
-IEEE 33-bus feeder (Baran & Wu 1989, `n_nodes=33`, `n_qubits=37`) the same
-way as headline result 1 — no decomposition, whole graph — 91% of
-candidate exchanges have no witness of *any* practical size, and the
-resulting mixer is not fully connected: a real completeness gap, not a
-performance number (`results/real_feeder_results.csv`). This isn't a
-search cap being too small either — the witness the whole graph would
-actually need spans dozens of qubits (measured directly,
-`docs/circuit-validity.md`), so a bigger cap doesn't fix it. A different
-construction does.
-
-**The fix: don't build one circuit for the whole network.** Partition
-into zones via a min tie-line-cut, solve each zone's matroid mixer
-independently (small qubit count each), plus one small assembly mixer
-over the contracted zone graph — a standard partition/assembly strategy,
-not a new invention, guaranteed exact by graphic-matroid
-contraction/deletion (the union of every zone's spanning tree plus the
-assembly problem's spanning tree is provably a spanning tree of the whole
-graph). It's the natural fix specifically *because* the failure above is
-local to individual long-range ties: keep each zone small enough that any
-tie edge still inside it stays short-range-like, and push the genuinely
-long-range connections out to one small assembly problem instead of
-forcing the whole graph to absorb their cost.
-
-![A graph partitioned into zones, plus the contracted assembly problem](results/illustration_decomposition.png)
-
-*(synthetic — illustrative example, 24 nodes, not the 33-bus graph)*
-
-**Validated end-to-end on real data.** Real construction, exact per-term
-leakage verification, transpiled gate counts, at 4 partition
-granularities on the actual 33-bus graph (`n_nodes=33`, `n_qubits=37`) —
-every zone and assembly subproblem is exactly leak-free with witness size
-0-4, versus 22-34 on the whole graph (`results/zone_decomposition_results.csv`).
-
-![Whole-graph vs. zone-decomposed witness requirement](results/decomposition_scaling_plot.png)
-
-*(synthetic sweep — this is not the 33-bus graph either; that fixed
-`n_nodes=33` single point can't produce a "vs. network size" curve by
-itself)* this isn't a one-instance coincidence though: on a synthetic
-family reproducing the real failure mode at controllable size (12
-seeds/size, `n_nodes` 10-120), the whole-graph requirement grows roughly
-linearly while the decomposed requirement (fixed zone size) stays flat
-around 3 — the divergence above is the headline claim of this repo.
-
-**In the same units as headline result 1**, so the two are directly
-comparable: the plot above is by `n_nodes`, but headline result 1 was
-measured in qubits. Re-plotting the *same synthetic sweep data* above by
-qubit count (`n_qubits = n_nodes - 1 + k_ties`, an exact conversion, not
-a new measurement, and still not the 33-bus graph):
-
-![Whole-graph vs. zone-decomposed witness requirement, by qubit count](results/decomposition_scaling_by_qubits_plot.png)
-
-Headline result 1 only tested up to `n_qubits=35` (shaded band) — within
-that range alone, the whole-graph and decomposed requirements haven't
-even visibly diverged yet. The real point of this second sweep is that it
-extends *far* past where headline result 1 stopped (up to `n_qubits=124`)
-without decomposition losing the flat line it started with: the same
-small-witness regime headline result 1 already validated keeps holding,
-just via a different mechanism (fixed zone size) once the whole graph
-itself would have grown out of it.
-
-**Full account, including what didn't smooth over**: the real-topology
-failure and its root cause, a first attempted fix that turned out
-insufficient, the decomposition fix and its validation, the scaling
-sweep, a follow-up finding that circuit cost (unlike witness size) didn't
-initially show a clean trend, and the logic-minimization fix that
-followed from investigating why — all in `docs/circuit-validity.md`, in
-the order it was actually found. `docs/mixer-construction.md` is the
-standalone technical reference (matroid theory, exact circuit derivation,
-verification arguments) if you want the mechanism independent of the
-narrative.
-
-## Headline result 3: a second witness-blowup axis, and a bounded alternative to decomposition — but only once its own circuit cost was checked
-
-Headline result 2 traced the whole-graph witness bound's failure on real
-data to tie *range*, and fixed it with zone decomposition. This section
-covers three more pieces, developed on a downstream project and ported
-back onto this branch: a **second, independent axis** — tie *density*
-alone, on this repo's own short-range nearest-tie graph family, unchanged
-in every other respect — also breaks the same bound; an **alternative to
-decomposition** for cases where a bounded witness is preferred to
-splitting the problem into zones — `truncated_mixer.py` accepts a
-fixed-size witness cap and the resulting (measured, not assumed) leakage,
-instead of dropping a candidate exchange outright; and, once the first
-version of that alternative's actual circuit cost was measured (not
-assumed) rather than just its connectivity and leakage — this repo's own
-standard metric, headline results 1 and 2 are built around it — it turned
-out to cost **up to 38x more than necessary**, for reasons a follow-up
-investigation traced and mostly fixed (a cost-aware search objective,
-`cost_alpha`, now the construction's default). Full account, numbers, the
-real correctness bug the second construction's cross-checking caught in
-code the previous headline results already depended on, and the
-circuit-cost investigation and fix: `docs/bounded-witness-mixer.md`.
-
-## Headline result 4: an escalating realism check, two bugs, a dead end, and a real-topology validated fix
-
-Two follow-up questions once headline result 3's `cost_alpha` fix was in
-place: does headline result 1's own "cost decreases with scale" claim
-survive a more realistic tie-count growth model (it doesn't: under a
-mild, single-anchor-calibrated alternative, the trend inverts and costs
-3-6x more); and does the bounded-witness mixer hold up, cost-wise, across
-an escalating ladder of realism (short/long-range ties, log/linear
-tie-count growth), and is any of it close to running on current hardware
-(no — even the cheapest tested conditions are well outside NISQ-plausible
-gate counts once you do the fidelity arithmetic).
-
-Pushing the circuit cost down further to close that gap surfaced a real
-bug — a search objective that can make most of a mixer's terms silently
-stop firing at all, producing a circuit that looks safe only because it
-has stopped being a mixer — and a dead end that looked like a fix for it
-(a per-term adaptive cost coefficient) but, once properly re-validated
-*after* that bug fix rather than before it, turned out to cost MORE than
-the simple fixed coefficient it was meant to improve on, not less. The
-fix that actually works is combining the bounded-witness mixer with zone
-decomposition (headline result 2's own fix, originally built for the
-exact construction) — the SAME rejected adaptive-search bug turned up a
-second time inside the decomposition script itself, was fixed the same
-way, and every dependent result was re-run. Once measured correctly on
-both sides, decomposition dominates almost everywhere it applies.
-
-A follow-up check found real (and real-benchmark) feeder data —
-CIGRE MV, IEEE33, and a real German MV network — clearly supports
-log-scaled tie-count growth over linear (the tie/bus ratio drops 6x from
-15 to 179 buses) and confirms real ties are genuinely long-range,
-matching this branch's own generator choices; `CONDITIONS` now defaults
-to the two log-growth conditions, with linear kept as an explicit
-stress test rather than an equally realistic one. A further refinement
-— density-aware hierarchical decomposition, recursing on the assembly
-graph when it's itself still dense — pushes the hardest remaining
-condition further toward (not fully into) NISQ-plausible territory. And
-the actual construction (not a synthetic proxy) was run directly on two
-real networks: on IEEE33, where the exact whole-graph construction is
-already known to fail outright (headline result 2), the decomposed
-cost-aware construction produces a complete, fully functional, 132-CX
-mixer. A final refinement — cost-CAPPED decomposition, which measures
-each subproblem's actual cost and recursively re-splits anything too
-expensive instead of picking a zone size and hoping — gets every single
-seed of the synthetic ladder under 500 CX with perfect safety, and comes
-within 1.6% of that same target on real data (CIGRE MV hits it cleanly;
-IEEE33 misses by 8 CX, traced to one small, genuinely irreducible dense
-core, not a search failure). Full account, including both methodology
-mistakes made and caught along the way (worth reading for what that
-looked like, not just the corrected numbers): `docs/scaling-ladder-and-decomposition.md`.
-
-## What this does and doesn't demonstrate
-
-This repo shows the mixer **construction** is correct and scales — both
-on synthetic data and, via decomposition, on real topology. It does
-**not** show a quantum algorithm outperforming a classical baseline:
-there is no cost-Hamiltonian/oracle integration, no QAOA execution, no
-classical solver comparison, and no test of the iterative boundary
-coupling (an ADMM-style loop) this kind of decomposition would need for
-the actual optimization objective — only the radiality constraint,
-tested here, decomposes exactly. Treat this as evidence the algorithm is buildable and
-scalable, a precondition for an advantage claim, not the claim itself.
-
-## A correctness bug found and fixed during this study
-
-An early version of the mixer circuit was **wrong**: an unconditional
-swap gate leaked probability outside the feasible subspace on roughly
-half the instances tested, caught by direct verification against the
-exact circuit unitary rather than assumed safe. The fix — witness-qubit
-conditioning, found by direct search — is in `docs/circuit-validity.md`.
-`scripts/verify_correctness.py` re-runs this check independently of the
-scaling measurements.
+This repo contains the measurement methodology and results for the
+question above only. It does **not** include a production
+mixer-compilation library, does not cover other constraint classes, and
+does not include hardware execution, QAOA solution quality, or a
+classical baseline comparison — see `methodology.md` for the precise
+boundary of what was measured.
 
 ## Repository layout
 
@@ -391,22 +463,25 @@ scaling measurements.
   real-scale safety survey), and the circuit-cost investigation that
   found the first version of that construction cost up to 38x more than
   necessary, plus the cost-aware search fix that mostly closed the gap.
-- `docs/scaling-ladder-and-decomposition.md` — headline result 4: does
-  headline result 1's flat-tie-count assumption hold under a more
-  realistic growth model (no); an escalating realism ladder for the
-  bounded-witness mixer and a NISQ hardware feasibility check; a real
-  bug (silent term collapse) found while pushing cost down further; a
-  dead end (per-term adaptive cost pressure) that looked like a fix and
-  wasn't, caught by re-validation; the fix that actually works
-  (decomposition + the bounded-witness mixer, dominating almost
-  everywhere it applies) -- including a SECOND instance of the same
-  adaptive-search bug found inside the decomposition script itself;
-  density-aware hierarchical decomposition, pushing the hardest
-  remaining conditions further toward NISQ feasibility; a real-topology
-  check validating log-growth/long-range tie modeling against real
-  (and real-benchmark) feeder data, after which linear tie-count growth
-  moved from a default condition to an explicit stress test; direct
-  validation of the actual construction on two real networks; and two
+- `docs/scaling-ladder-and-decomposition.md` — does the flat-tie-count
+  assumption hold under a more realistic growth model (no); an
+  escalating realism ladder for the bounded-witness mixer and a NISQ
+  hardware feasibility check; a real bug (silent term collapse) found
+  while pushing cost down further; a dead end (per-term adaptive cost
+  pressure) that looked like a fix and wasn't, caught by re-validation;
+  the fix that actually works (decomposition + the bounded-witness
+  mixer, dominating almost everywhere it applies) -- including a SECOND
+  instance of the same adaptive-search bug found inside the
+  decomposition script itself; density-aware hierarchical decomposition,
+  pushing the hardest remaining conditions further toward NISQ
+  feasibility; a real-topology check validating log-growth/long-range
+  tie modeling against real (and real-benchmark) feeder data, after
+  which linear tie-count growth moved from a default condition to an
+  explicit stress test; direct validation of the actual construction on
+  two real networks; cost-capped decomposition (measures each
+  subproblem's actual cost and recursively re-splits anything over a
+  threshold, guaranteeing every synthetic-ladder seed stays under 500
+  CX, and coming within 1.6% of that target on real data); and two
   methodology mistakes this investigation made and caught (comparing
   results across a code fix without re-running both sides, twice).
 - `scripts/` — synthetic sweep: `graphs.py`, `mixer.py`, `measure.py`,
@@ -434,8 +509,8 @@ scaling measurements.
   density family and long-range family + real scale), and
   `truncated_mixer_search_refinement.py` (cap=0/1 instability check, and
   the `cost_alpha` sweep that set the construction's current default).
-  Escalating realism ladder + decomposition (headline result 4):
-  `run_scaling_study_log_ties.py` (headline result 1's own assumption,
+  Escalating realism ladder + decomposition:
+  `run_scaling_study_log_ties.py` (the flat-tie-count assumption,
   stress-tested), `run_cost_aware_scaling_ladder.py` (the four-condition
   ladder), `run_cost_aware_scaling_ladder_aggressive.py` (the never-fire
   collapse, deliberately reproduced with `active_terms` tracked so it's
