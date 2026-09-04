@@ -39,7 +39,7 @@ synthetic proxies.
 
 1. **Establish the baseline** on synthetic data: does the exact
    construction scale at all, under the simplest realistic assumptions?
-   (Results, part 1, below.)
+   (technique 1, below.)
 2. **Stress-test it against real topology.** It breaks — trace *why*
    before reaching for a fix.
 3. **Fix it two independent ways**, each solving a different piece of the
@@ -147,7 +147,9 @@ density-focused synthetic family respectively (`docs/bounded-witness-mixer.md`'s
 Finding 1). When that happens, the exact construction doesn't get
 gradually more expensive — it gives up on candidates outright
 (`dropped_candidates` climbs to 51-95%) and the resulting mixer stops
-being fully connected.
+being fully connected. Full derivation, the real-topology failure's
+root-cause trace, and the exact circuit-level construction:
+`docs/circuit-validity.md` and `docs/mixer-construction.md`.
 
 **2. Bounded-witness mixer (`truncated_mixer.py`) — bounds *cost*
 directly, at a measured, small leakage cost.** When no small *exact*
@@ -267,109 +269,13 @@ equally realistic (`docs/scaling-ladder-and-decomposition.md` §9 has the
 full check, including honest caveats — 3 points spanning one order of
 magnitude rules out linear but doesn't fit an actual growth law).
 
-## Results, part 1: the exact construction (what a fault-tolerant device could run today)
-
-The exact construction (technique 1) is the one with no approximation and
-no leakage risk from splitting the problem — the number relevant to
-"does this work at all, with unlimited circuit budget." It's put through
-two independent stress tests below, and they ask genuinely different
-questions with genuinely different answers: **1a** asks whether its
-*cost* holds up under a more realistic assumption, still on synthetic
-data; **1b** asks whether it even *works at all* on real, published
-topology. Don't read 1b as a continuation of 1a's cost story — it's a
-different axis (tie *range*, not tie-count *growth rate*) and, correspondingly,
-a different metric (completeness, not CX count).
-
-### 1a. Does cost scale under a realistic tie-count growth assumption? (synthetic data only)
-
-Built directly on a synthetic sparse-feeder
-family, `k_ties` held fixed as the network grows:
-
-![Mixer circuit CX count and depth vs. instance size](results/scaling_plot.png)
-
-Measured across 26 instance sizes (`n_qubits` 10–35), 5 seeds per size.
-**Within this range, cost trends flat-to-*decreasing* with size** — the
-network gets sparser as it grows (same few ties spread across more
-nodes), so there are fewer, cheaper exchanges to condition. This trend is
-a property of the flat-tie-count assumption specifically, not the
-construction in general: under log-scaled tie-count growth (the
-realistic model, per above), the exact construction's cost instead
-**increases** — 3.4x more on average, 5.8x more at the 33-node
-calibration point (`docs/scaling-ladder-and-decomposition.md` §1):
-
-![Same exact construction, two tie-count growth assumptions -- cost trend inverts](results/fixed_vs_log_tiecount_plot.png)
-
-Nothing here has touched real topology yet — both curves above are
-synthetic, short-range-tie-by-construction graphs. That's exactly what
-1b tests next.
-
-### 1b. Does the exact construction work at all on real, published topology?
-
-This is a different axis entirely from 1a: not *how many* ties there are
-(1a's question), but *how far apart* they are. Real tie switches
-deliberately connect distant parts of a feeder for redundancy (see
-"Background" above) — every graph in 1a was short-range by construction,
-so 1a never actually tested this. Because the question here is "does a
-working circuit term exist at all for every candidate exchange," not "how
-much does it cost," the metric below is **witness size** (a completeness
-measure), not CX — a deliberate switch, not an inconsistency.
-
-**Real topology (IEEE 33-bus feeder).** Built the same way as 1a, directly
-on the real, published feeder (Baran & Wu 1989, `n_nodes=33`, `n_qubits=37`,
-via `pandapower.networks.case33bw`): **it fails.** 91% of candidate
-exchanges have no witness of any practical size, and the resulting mixer
-is not fully connected — a completeness gap, not a performance number
-(`results/real_feeder_results.csv`). Not a search-cap artifact either:
-the witness the whole graph would actually need spans dozens of qubits,
-measured directly. This is a harder failure than anything in 1a — 1a's
-"realistic" condition still produced a working, just more expensive,
-circuit; this one doesn't produce a working circuit at all.
-
-**Zone decomposition (technique 3) recovers exactness, and stays cheap as
-size grows.** On the same real 33-bus graph, every zone/assembly
-subproblem is exactly leak-free with witness size 0-4, vs. 22-34 on the
-whole graph (`results/zone_decomposition_results.csv`). On a synthetic
-family reproducing the real failure mode at controllable sizes (12
-seeds/size, `n_nodes` 10-120):
-
-![Whole-graph vs. zone-decomposed witness requirement](results/decomposition_scaling_plot.png)
-
-The whole-graph requirement grows roughly linearly; the decomposed
-requirement (fixed zone size) stays flat around 3 — the central claim of
-the decomposition fix. (Re-plotted by qubit count for direct comparison
-against 1a's synthetic baseline: `results/decomposition_scaling_by_qubits_plot.png`
-— within 1a's own tested range, the two hadn't even visibly diverged
-yet; the real point of that sweep is what happens past where 1a stopped.)
-
-**On a second real network (CIGRE MV, 15 buses, 3 ties)**, back to CX
-cost since this graph is small enough that exact whole-graph construction
-*doesn't* fail here — succeeds at 16 terms, 12,220 CX, 24,245 depth. So
-this data point answers a third, different question again: given a
-network where nothing was broken to begin with, does decomposition still
-help? Yes — 3.3x cheaper, to 3,668 CX (`docs/scaling-ladder-and-decomposition.md` §10).
-
-**Bottom line for a fault-tolerant device**: cost alone is
-assumption-dependent (1a — realistic tie growth costs more, not less),
-and completeness can fail outright on real topology (1b). Zone
-decomposition fixes 1b's completeness failure exactly (provably, by
-matroid contraction/deletion — see "Techniques" above) and is cheaper
-besides even on a network where nothing was broken. Exact + decomposed is
-what "ready for a fault-tolerant device" means for the rest of this
-document.
-
-**Full account**, including the failure's root cause, a first attempted
-fix that was insufficient, and a follow-up circuit-cost investigation:
-`docs/circuit-validity.md`. `docs/mixer-construction.md` is the
-standalone technical reference (matroid theory, exact circuit derivation,
-verification arguments).
-
-## Results, part 2: the NISQ-ready construction (decomposition + cost-aware bounded-witness mixer)
+## Results: the NISQ-ready construction (decomposition + cost-aware bounded-witness mixer)
 
 Exactness alone doesn't make a circuit runnable soon: rough NISQ
 feasibility arithmetic (`fidelity ≈ (1-p)^N_CX`, published two-qubit gate
-fidelity ranges) shows even the flat-decomposed real-network numbers
-above are well outside a plausible regime once tie count and range are
-modeled realistically:
+fidelity ranges) shows that even a cheaply-decomposed real network's CX
+count (see the real-network table further down) can land well outside a
+plausible regime once tie count and range are modeled realistically:
 
 | CX count | best-case trapped-ion (p=0.001) | typical superconducting (p=0.005) |
 |---|---|---|
@@ -604,11 +510,11 @@ boundary of what was measured.
   each subproblem's actual CX cost and recursively re-splits anything over
   a threshold, rather than picking a zone size and hoping -- 100% success
   on the synthetic ladder, tested on both real networks too) round it out.
-  `plot_results_figures.py` generates this README's five result figures
-  (`fixed_vs_log_tiecount_plot.png`, `ladder_cx_plot.png`,
-  `construction_progression_plot.png`, `nisq_feasibility_plot.png`,
-  `real_network_comparison_plot.png`) directly from already-committed
-  CSVs -- no re-measurement, same discipline as `plot_decomposition_by_qubits.py`.
+  `plot_results_figures.py` generates this README's four result figures
+  (`ladder_cx_plot.png`, `construction_progression_plot.png`,
+  `nisq_feasibility_plot.png`, `real_network_comparison_plot.png`)
+  directly from already-committed CSVs -- no re-measurement, same
+  discipline as `plot_decomposition_by_qubits.py`.
 - `results/` — one CSV/plot pair per script above, all generated, none
   hand-edited; `*_before_minimization.*` files are the pre-fix numbers,
   kept for the before/after comparison in `docs/circuit-validity.md`;

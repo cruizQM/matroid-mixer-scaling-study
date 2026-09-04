@@ -1,20 +1,26 @@
 """Generates README-facing result figures from already-committed CSVs --
 no new measurement, just visualizing numbers that were previously only
-presented as markdown tables. Five figures:
+presented as markdown tables. Four figures:
 
-1. `fixed_vs_log_tiecount_plot.png` -- headline result 1's flat-tie-count
-   assumption vs. the more realistic log-scaled alternative (does cost
-   really decrease with scale? depends which you assume).
-2. `ladder_cx_plot.png` -- the escalating ladder's two default conditions
+1. `ladder_cx_plot.png` -- the escalating ladder's two default conditions
    (short_log, long_log), cost-aware bounded-witness mixer, CX vs. size.
-3. `construction_progression_plot.png` -- the three-stage fix, CX vs.
+2. `construction_progression_plot.png` -- the three-stage fix, CX vs.
    size, whole-graph -> flat decomposition -> cost-capped decomposition,
    against the 500-CX target line.
-4. `nisq_feasibility_plot.png` -- fidelity vs. CX count (published
+3. `nisq_feasibility_plot.png` -- fidelity vs. CX count (published
    two-qubit gate error rates), with the two real networks' three
    construction variants plotted directly on the curve.
-5. `real_network_comparison_plot.png` -- grouped bar chart, CX cost per
+4. `real_network_comparison_plot.png` -- grouped bar chart, CX cost per
    construction, both real networks, against the 500-CX target line.
+
+(A fifth figure, `fixed_vs_log_tiecount_plot.png`, was removed along with
+the README's "Results, part 1" section, which it existed solely to
+support -- the flat-vs-log tie-count comparison it visualized stopped
+being a live question once the rest of this document committed to log
+growth as the realistic assumption throughout. `scaling_log_ties_summary.csv`
+and the script that produces it, `run_scaling_study_log_ties.py`, are
+kept -- they're still the evidentiary basis for
+`docs/scaling-ladder-and-decomposition.md`'s section 1.)
 
 Reads only `results/*.csv`; writes only `results/*_plot.png`. Regenerate
 with `python scripts/plot_results_figures.py`.
@@ -44,27 +50,6 @@ def _series(rows: list[dict], key_col: str, key_val: str, x_col: str, y_col: str
     )
     xs, ys = zip(*pts)
     return list(xs), list(ys)
-
-
-def plot_fixed_vs_log_tiecount() -> None:
-    rows = _rows("scaling_log_ties_summary.csv")
-    fig, ax = plt.subplots(figsize=(7, 4.8))
-    for cond, color, label in (
-        ("fixed", "#4472C4", "fixed $k_{ties}=3$ (headline result 1's own assumption)"),
-        ("log", "#C0392B", "log-scaled $k_{ties}(n) = round(1.43\\ln n)$ (real-data-calibrated)"),
-    ):
-        xs, ys = _series(rows, "condition", cond, "n_nodes", "cx_mean")
-        ax.plot(xs, ys, marker="o", color=color, label=label)
-    ax.set_xlabel("n_nodes")
-    ax.set_ylabel("transpiled CX count (mean over seeds)")
-    ax.set_title("Same exact construction, two tie-count growth assumptions:\ncost trend inverts depending which one is true")
-    ax.legend(fontsize=8.5, loc="upper right")
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    out = RESULTS_DIR / "fixed_vs_log_tiecount_plot.png"
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    print(f"wrote {out}")
 
 
 def plot_ladder_cx() -> None:
@@ -214,7 +199,6 @@ def plot_real_network_comparison() -> None:
 
 
 if __name__ == "__main__":
-    plot_fixed_vs_log_tiecount()
     plot_ladder_cx()
     plot_construction_progression()
     plot_nisq_feasibility()
