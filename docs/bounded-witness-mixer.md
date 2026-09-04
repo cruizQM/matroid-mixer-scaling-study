@@ -262,6 +262,19 @@ Reproduce: `python scripts/measure_truncated_mixer.py`,
 `python scripts/truncated_witness_cap_sweep_longrange.py`,
 `python scripts/truncated_mixer_search_refinement.py`.
 
+**This is not the end of the story.** A follow-up investigation
+(`docs/scaling-ladder-and-decomposition.md`) checked this fixed
+`cost_alpha=0.01` default against an escalating ladder of more realistic
+assumptions, tried replacing it with a per-term ADAPTIVE coefficient
+that looked like a clean win on an initial sweep and was not once
+properly re-validated (a real, instructive dead end, kept in the record
+rather than erased), found and fixed a genuine bug along the way (a
+search objective that can make most of a mixer's terms silently stop
+firing at all), and landed on the fix that actually works: combining
+this construction with zone decomposition, which dominates the
+whole-graph version everywhere tested. Read that document for what
+happened after this one.
+
 ### Real-scale safety survey
 
 `run_bounded_witness_safety_survey.py` builds a truncated mixer on

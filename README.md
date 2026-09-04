@@ -123,6 +123,12 @@ python scripts/measure_truncated_mixer.py               # circuit-cost investiga
 python scripts/truncated_witness_cap_sweep.py           # witness-cap vs. cost/safety tradeoff (density family)
 python scripts/truncated_witness_cap_sweep_longrange.py # same tradeoff, generalized to the long-range family + real scale
 python scripts/truncated_mixer_search_refinement.py     # cap=0/1 + the cost-aware search fix (cost_alpha)
+python scripts/run_scaling_study_log_ties.py            # is headline result 1's flat-tie-count assumption load-bearing?
+python scripts/run_cost_aware_scaling_ladder.py         # escalating realism ladder for the bounded-witness mixer
+python scripts/run_cost_aware_scaling_ladder_aggressive.py  # pushing cost down: the never-fire bug, made visible
+python scripts/run_fixed_alpha_ladder.py                # fixed cost_alpha baseline, re-measured post-fix
+python scripts/run_decomposed_cost_aware_ladder.py      # decomposition + bounded-witness mixer combined (the actual fix)
+python scripts/run_best_of_both_ladder.py               # confirms decomposition dominates -- never loses a seed
 ```
 
 All scripts are deterministic (fixed random seeds); re-running should
@@ -294,6 +300,36 @@ real correctness bug the second construction's cross-checking caught in
 code the previous headline results already depended on, and the
 circuit-cost investigation and fix: `docs/bounded-witness-mixer.md`.
 
+## Headline result 4: an escalating realism check, a real bug, a dead end, and the fix that actually works
+
+Two follow-up questions once headline result 3's `cost_alpha` fix was in
+place: does headline result 1's own "cost decreases with scale" claim
+survive a more realistic tie-count growth model (checked independently
+of anything in headline result 3 — it doesn't: under a mild,
+single-anchor-calibrated alternative, the trend inverts and costs 3-6x
+more); and does the bounded-witness mixer hold up, cost-wise, across an
+escalating ladder of realism (short/long-range ties, log/linear tie-count
+growth), and is any of it close to running on current hardware (no —
+even the cheapest tested conditions are well outside NISQ-plausible gate
+counts once you do the fidelity arithmetic).
+
+Pushing the circuit cost down further to close that gap surfaced a real
+bug — a search objective that can make most of a mixer's terms silently
+stop firing at all, producing a circuit that looks safe only because it
+has stopped being a mixer — and a dead end that looked like a fix for it
+(a per-term adaptive cost coefficient) but, once properly re-validated
+*after* that bug fix rather than before it, turned out to cost MORE than
+the simple fixed coefficient it was meant to improve on, not less. The
+fix that actually works is combining the bounded-witness mixer with zone
+decomposition (headline result 2's own fix, originally built for the
+exact construction): it dominates the whole-graph bounded-witness
+construction everywhere tested, by up to 26x, and never loses a single
+seed once the network is large enough to decompose at all. Full account,
+including a methodology mistake this investigation made and caught along
+the way (comparing results generated before and after the bug fix
+without re-running both sides — worth reading for what that looked like,
+not just the corrected numbers): `docs/scaling-ladder-and-decomposition.md`.
+
 ## What this does and doesn't demonstrate
 
 This repo shows the mixer **construction** is correct and scales — both
@@ -332,6 +368,17 @@ scaling measurements.
   real-scale safety survey), and the circuit-cost investigation that
   found the first version of that construction cost up to 38x more than
   necessary, plus the cost-aware search fix that mostly closed the gap.
+- `docs/scaling-ladder-and-decomposition.md` — headline result 4: does
+  headline result 1's flat-tie-count assumption hold under a more
+  realistic growth model (no); an escalating realism ladder for the
+  bounded-witness mixer and a NISQ hardware feasibility check; a real
+  bug (silent term collapse) found while pushing cost down further; a
+  dead end (per-term adaptive cost pressure) that looked like a fix and
+  wasn't, caught by re-validation; the fix that actually works
+  (decomposition + the bounded-witness mixer, dominating everywhere it
+  applies); and a methodology mistake this investigation itself made and
+  caught (comparing results across a code fix without re-running both
+  sides).
 - `scripts/` — synthetic sweep: `graphs.py`, `mixer.py`, `measure.py`,
   `run_scaling_study.py`, `plot.py`, `verify_correctness.py`. Real
   topology: `real_feeders.py`, `run_real_feeder_validation.py`,
@@ -357,6 +404,19 @@ scaling measurements.
   density family and long-range family + real scale), and
   `truncated_mixer_search_refinement.py` (cap=0/1 instability check, and
   the `cost_alpha` sweep that set the construction's current default).
+  Escalating realism ladder + decomposition (headline result 4):
+  `run_scaling_study_log_ties.py` (headline result 1's own assumption,
+  stress-tested), `run_cost_aware_scaling_ladder.py` (the four-condition
+  ladder), `run_cost_aware_scaling_ladder_aggressive.py` (the never-fire
+  collapse, deliberately reproduced with `active_terms` tracked so it's
+  visible in the CSV), `run_cost_aware_scaling_ladder_alpha_sweep.py`
+  and `truncated_mixer_search_refinement.py`'s adaptive-search addition
+  in `truncated_mixer.py` (the adaptive-alpha dead end),
+  `run_fixed_alpha_ladder.py` (the fixed-`cost_alpha` baseline,
+  re-measured after the never-fire fix so the final comparison is valid),
+  `run_decomposed_cost_aware_ladder.py` (the fix that works), and
+  `run_best_of_both_ladder.py` (confirms decomposition never loses once
+  it can be applied at all).
 - `results/` — one CSV/plot pair per script above, all generated, none
   hand-edited; `*_before_minimization.*` files are the pre-fix numbers,
   kept for the before/after comparison in `docs/circuit-validity.md`;
