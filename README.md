@@ -267,9 +267,18 @@ magnitude rules out linear but doesn't fit an actual growth law).
 
 The exact construction (technique 1) is the one with no approximation and
 no leakage risk from splitting the problem — the number relevant to
-"does this work at all, with unlimited circuit budget."
+"does this work at all, with unlimited circuit budget." It's put through
+two independent stress tests below, and they ask genuinely different
+questions with genuinely different answers: **1a** asks whether its
+*cost* holds up under a more realistic assumption, still on synthetic
+data; **1b** asks whether it even *works at all* on real, published
+topology. Don't read 1b as a continuation of 1a's cost story — it's a
+different axis (tie *range*, not tie-count *growth rate*) and, correspondingly,
+a different metric (completeness, not CX count).
 
-**Synthetic baseline.** Built directly on a synthetic sparse-feeder
+### 1a. Does cost scale under a realistic tie-count growth assumption? (synthetic data only)
+
+Built directly on a synthetic sparse-feeder
 family, `k_ties` held fixed as the network grows:
 
 ![Mixer circuit CX count and depth vs. instance size](results/scaling_plot.png)
@@ -286,36 +295,63 @@ calibration point (`docs/scaling-ladder-and-decomposition.md` §1):
 
 ![Same exact construction, two tie-count growth assumptions -- cost trend inverts](results/fixed_vs_log_tiecount_plot.png)
 
-**Real topology (IEEE 33-bus feeder).** Built the same way, directly on
-the real, published feeder (Baran & Wu 1989, `n_nodes=33`, `n_qubits=37`,
+Nothing here has touched real topology yet — both curves above are
+synthetic, short-range-tie-by-construction graphs. That's exactly what
+1b tests next.
+
+### 1b. Does the exact construction work at all on real, published topology?
+
+This is a different axis entirely from 1a: not *how many* ties there are
+(1a's question), but *how far apart* they are. Real tie switches
+deliberately connect distant parts of a feeder for redundancy (see
+"Background" above) — every graph in 1a was short-range by construction,
+so 1a never actually tested this. Because the question here is "does a
+working circuit term exist at all for every candidate exchange," not "how
+much does it cost," the metric below is **witness size** (a completeness
+measure), not CX — a deliberate switch, not an inconsistency.
+
+**Real topology (IEEE 33-bus feeder).** Built the same way as 1a, directly
+on the real, published feeder (Baran & Wu 1989, `n_nodes=33`, `n_qubits=37`,
 via `pandapower.networks.case33bw`): **it fails.** 91% of candidate
 exchanges have no witness of any practical size, and the resulting mixer
 is not fully connected — a completeness gap, not a performance number
 (`results/real_feeder_results.csv`). Not a search-cap artifact either:
 the witness the whole graph would actually need spans dozens of qubits,
-measured directly.
+measured directly. This is a harder failure than anything in 1a — 1a's
+"realistic" condition still produced a working, just more expensive,
+circuit; this one doesn't produce a working circuit at all.
 
-**Zone decomposition recovers exactness, and stays cheap as size grows.**
-On the same real 33-bus graph, every zone/assembly subproblem is exactly
-leak-free with witness size 0-4, vs. 22-34 on the whole graph
-(`results/zone_decomposition_results.csv`). On a synthetic family
-reproducing the real failure mode at controllable sizes (12 seeds/size,
-`n_nodes` 10-120):
+**Zone decomposition (technique 2) recovers exactness, and stays cheap as
+size grows.** On the same real 33-bus graph, every zone/assembly
+subproblem is exactly leak-free with witness size 0-4, vs. 22-34 on the
+whole graph (`results/zone_decomposition_results.csv`). On a synthetic
+family reproducing the real failure mode at controllable sizes (12
+seeds/size, `n_nodes` 10-120):
 
 ![Whole-graph vs. zone-decomposed witness requirement](results/decomposition_scaling_plot.png)
 
 The whole-graph requirement grows roughly linearly; the decomposed
 requirement (fixed zone size) stays flat around 3 — the central claim of
 the decomposition fix. (Re-plotted by qubit count for direct comparison
-against the synthetic baseline above: `results/decomposition_scaling_by_qubits_plot.png`
-— within headline result 1's own tested range, the two hadn't even
-visibly diverged yet; the real point of that sweep is what happens past
-where headline result 1 stopped.)
+against 1a's synthetic baseline: `results/decomposition_scaling_by_qubits_plot.png`
+— within 1a's own tested range, the two hadn't even visibly diverged
+yet; the real point of that sweep is what happens past where 1a stopped.)
 
-**On a second real network (CIGRE MV, 15 buses, 3 ties)**: exact
-whole-graph construction succeeds here (small enough graph), at 16 terms,
-12,220 CX, 24,245 depth — decomposition still cuts that 3.3x, to 3,668 CX
-(`docs/scaling-ladder-and-decomposition.md` §10).
+**On a second real network (CIGRE MV, 15 buses, 3 ties)**, back to CX
+cost since this graph is small enough that exact whole-graph construction
+*doesn't* fail here — succeeds at 16 terms, 12,220 CX, 24,245 depth. So
+this data point answers a third, different question again: given a
+network where nothing was broken to begin with, does decomposition still
+help? Yes — 3.3x cheaper, to 3,668 CX (`docs/scaling-ladder-and-decomposition.md` §10).
+
+**Bottom line for a fault-tolerant device**: cost alone is
+assumption-dependent (1a — realistic tie growth costs more, not less),
+and completeness can fail outright on real topology (1b). Zone
+decomposition fixes 1b's completeness failure exactly (provably, by
+matroid contraction/deletion — see "Techniques" above) and is cheaper
+besides even on a network where nothing was broken. Exact + decomposed is
+what "ready for a fault-tolerant device" means for the rest of this
+document.
 
 **Full account**, including the failure's root cause, a first attempted
 fix that was insufficient, and a follow-up circuit-cost investigation:
