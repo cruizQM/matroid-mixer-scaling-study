@@ -29,11 +29,14 @@ topology (the IEEE 33-bus feeder) — genuinely infeasible witness sizes,
 not a tunable search limit. Two things fix it: **zone decomposition**
 (splits the constraint into small, exactly-solvable pieces, provably
 lossless) and a **cost-aware bounded-witness mixer** (bounds circuit cost
-directly, at a small, measured leakage cost). Combined, and refined
-further under an escalating ladder of increasingly realistic assumptions,
-they produce a construction that is exact and NISQ-plausible on real
-feeder topology — validated directly on two real networks, not just
-synthetic proxies.
+directly, at a small, measured leakage cost). Together they produce two
+things, not one: an **exact** construction, already sufficient for a
+fault-tolerant device that doesn't need to care about gate count, and,
+via decomposition and a further cost-capped refinement, a **NISQ-plausible**
+construction with small, measured (non-zero) leakage — both validated
+directly on two real networks, not just synthetic proxies, though which
+specific combination gets a given real network into NISQ range varies
+network to network (see "Results" below).
 
 ## The strategy, at a glance
 
@@ -233,9 +236,9 @@ trust the result generally — so this repo stress-tests them across an
 two axes, both independently calibrated to the one real anchor point this
 repo started with (5 ties at the 33-bus feeder):
 
-- **tie placement**: short-range (nearest-tie, headline-result-1's
-  family) vs. long-range (the family the real-feeder failure and the
-  bounded-witness safety survey are built on).
+- **tie placement**: short-range (nearest-tie, the family used in the
+  "Background" figures above) vs. long-range (the family the real-feeder
+  failure and the bounded-witness safety survey are built on).
 - **tie-count growth**: log (`round(1.43*ln(n))`, mild) vs. linear
   (`round(0.1515*n)`, aggressive).
 
@@ -394,11 +397,12 @@ growth-model check), the complete set of scripts is listed under
 ## Scope
 
 This repo contains the measurement methodology and results for the
-question above only. It does **not** include a production
-mixer-compilation library, does not cover other constraint classes, and
-does not include hardware execution, QAOA solution quality, or a
-classical baseline comparison — see `methodology.md` for the precise
-boundary of what was measured.
+question above only — not a production mixer-compilation library, and
+not extended to constraint classes other than graphic-matroid radiality
+(`methodology.md` has the precise boundary). See "What this does and
+doesn't demonstrate" above for the separate, more important boundary:
+what a bounded-cost, buildable construction does and doesn't imply about
+QAOA performance.
 
 ## Repository layout
 
@@ -445,8 +449,10 @@ boundary of what was measured.
   `run_zone_decomposition_validation.py`,
   `run_decomposition_scaling_study.py` (does it hold as size grows?);
   `plot_decomposition_by_qubits.py` re-plots that sweep's results by
-  qubit count instead of node count, for direct comparison against
-  headline result 1 (reads the existing CSV, no re-measurement).
+  qubit count instead of node count, for direct comparison against the
+  synthetic scaling sweep (`run_scaling_study.py`, `scaling_plot.png` --
+  `docs/circuit-validity.md`'s "headline result 1") (reads the existing
+  CSV, no re-measurement).
   `plot_illustrations.py` generates the explanatory diagrams (not
   measurements) -- including `plot_bounded_witness_concept()` and
   `plot_cost_capped_decomposition_concept()`, added alongside this
