@@ -164,6 +164,144 @@ def _search_truncated_witness(
     return best_witness, valid_patterns, leak
 
 
+def _search_truncated_witness_adaptive(
+    trigger: List[int],
+    validity: Dict[int, bool],
+    candidate_pool: Sequence[int],
+    max_size: int,
+    rng: np.random.Generator,
+    attempts_per_size: int = 60,
+    gain_price: float = 0.01,
+) -> Tuple[Tuple[int, ...], Tuple[Tuple[int, ...], ...], float]:
+    """Replaces `_search_truncated_witness`'s FIXED `cost_alpha` penalty
+    with a PER-TERM one: still picks the size minimizing
+    `leak(size) + alpha_term * 2**size`, but `alpha_term` is computed
+    from THIS term's own achievable leak range (see `gain_price` below)
+    instead of being one hand-picked number shared by every term in the
+    construction.
+
+    Why this, instead of picking a better fixed `cost_alpha`: the
+    `cost_alpha` sweep (docs/bounded-witness-mixer.md's follow-up)
+    found a single global coefficient doesn't fit terms of different
+    difficulty -- on easy conditions most of the cost was pure slack
+    (pushing alpha higher cut cost 10-100x with NO safety loss), while on
+    hard conditions there was little slack to cut at all, and pushing
+    alpha too hard on the SMALLEST instances reintroduced the same
+    seed-fragility the cap=0/1 check already found. A fixed penalty can't
+    tell those cases apart because it doesn't look at how much a given
+    term is actually still improving.
+
+    **Not stepwise-greedy stopping, and not a fixed-percentage-of-gain
+    elbow either -- both were tried first.** Stepwise stopping (accept a
+    size only if it beats the PREVIOUS size by enough) reproduces exactly
+    the blind spot `_search_truncated_witness`'s own docstring already
+    warns about for greedy forward selection: an interaction effect where
+    sizes 1-2 individually buy little but size 3-4 TOGETHER buy a lot
+    looks, to a stepwise rule, like "stop, nothing's helping." A
+    fixed-percentage-of-the-full-curve elbow (accept the smallest size
+    that captures e.g. 85% of the total leak reduction from size 0 to
+    `max_size`) fixed that blind spot but didn't reproduce the slack the
+    `cost_alpha` sweep found empirically -- on calibration instances it
+    kept choosing witnesses nearly as wide as `cost_alpha=0.0` (no cost
+    awareness at all), because when a term's leak curve is gradual rather
+    than sharply elbowed, "capture most of the achievable gain" demands
+    going most of the way to `max_size` regardless of how little that
+    gain is worth in absolute terms.
+
+    **A second failure mode found and fixed here, not just in the search
+    objective's width term**: pushing `gain_price` (or `exact_search_max_size`
+    down, routing more candidates through this search) hard enough, MOST
+    terms independently landed on witness=() with `valid_patterns=()` --
+    "never fire" -- because a term's (e,f) pair is often invalid for a
+    strict MAJORITY of the trigger sample, so "never fire" already has
+    low LEAK (misclassifying only the minority of states where it should
+    have fired) at literally ZERO circuit cost, an unbeatable combination
+    under the `leak + alpha*cost` score alone. On one real instance, 146
+    of 151 terms collapsed this way -- a circuit that looks perfect
+    (near-zero CX, unsafe_rate=0.0) for the wrong reason: it barely does
+    anything, not because it preserves feasibility well.
+    `mixer.build_matroid_mixer`'s own union-find only ever selects a
+    candidate (e,f) pair as a term because it's confirmed to
+    `connects_something` in the tree sample -- so a term resolving to
+    "never fire" always defeats the reason it was selected at all, not
+    just a leaky-but-acceptable compromise. Fixed by tracking, separately
+    from the plain best-leak-at-each-size, the best leak found where
+    `valid_patterns` is NON-empty ("active") -- and restricting the final
+    size choice below to active options whenever at least one size offers
+    one, falling back to an inert witness only if truly no size (0
+    through `max_size`) can produce an active rule at all.
+
+    **What this does, given that fix**: search every size from 0 to
+    `max_size` INDEPENDENTLY first (fresh random-restart search per size
+    -- no stepwise dependency, so the interaction-effect blind spot
+    doesn't apply), tracking the best ACTIVE witness at each size, then
+    pick the active size minimizing `leak(size) + alpha_term * 2**size`
+    -- the SAME additive scoring `_search_truncated_witness` uses, but
+    with a PER-TERM `alpha_term` instead of one fixed global value:
+    `alpha_term = gain_price / max(total_achievable_gain, eps)`, where
+    `total_achievable_gain = leak(0) - best_leak_found_at_any_size` is
+    how much THIS term actually has to gain from growing its witness at
+    all. A term with a lot of achievable gain (leak drops sharply with
+    size -- the genuinely hard cases) gets a SMALL effective alpha, so
+    width stays affordable; a term with little to gain (leak barely moves
+    regardless of size -- the slack `cost_alpha` found on easy instances)
+    gets a LARGE effective alpha, so it settles for a cheap, narrow
+    witness instead of paying for width that isn't buying anything. This
+    is what makes the per-term adaptation automatic instead of requiring
+    a hand-picked global coefficient per condition."""
+    sizes = list(range(0, min(max_size, len(candidate_pool)) + 1))
+    best_leak_by_size: Dict[int, float] = {}
+    best_witness_by_size: Dict[int, Tuple[int, ...]] = {}
+    active_leak_by_size: Dict[int, float] = {}
+    active_witness_by_size: Dict[int, Tuple[int, ...]] = {}
+
+    patterns0, leak0 = _majority_rule(trigger, validity, ())
+    best_leak_by_size[0] = leak0
+    best_witness_by_size[0] = ()
+    if patterns0:
+        active_leak_by_size[0] = leak0
+        active_witness_by_size[0] = ()
+
+    for size in sizes[1:]:
+        size_best_witness: Tuple[int, ...] = ()
+        size_best_leak = leak0
+        size_active_best_witness: Tuple[int, ...] = None
+        size_active_best_leak = float("inf")
+        for _ in range(attempts_per_size):
+            witness = tuple(sorted(int(q) for q in rng.choice(candidate_pool, size=size, replace=False)))
+            patterns, leak = _majority_rule(trigger, validity, witness)
+            if leak < size_best_leak - 1e-12:
+                size_best_leak = leak
+                size_best_witness = witness
+            if patterns and leak < size_active_best_leak - 1e-12:
+                size_active_best_leak = leak
+                size_active_best_witness = witness
+        best_leak_by_size[size] = size_best_leak
+        best_witness_by_size[size] = size_best_witness
+        if size_active_best_witness is not None:
+            active_leak_by_size[size] = size_active_best_leak
+            active_witness_by_size[size] = size_active_best_witness
+
+    best_overall_leak = min(best_leak_by_size.values())
+    total_achievable_gain = leak0 - best_overall_leak
+    alpha_term = gain_price / max(total_achievable_gain, 1e-6)
+
+    if active_leak_by_size:
+        # Prefer an active (non-inert) rule at every size that has one --
+        # this is the fix: an inert "never fire" option is never allowed
+        # to win purely on cost, only accepted below if NOTHING active
+        # was found at any size (a rare, genuinely all-invalid case).
+        best_leak_by_size, best_witness_by_size = active_leak_by_size, active_witness_by_size
+
+    chosen_size = min(
+        best_leak_by_size, key=lambda s: best_leak_by_size[s] + alpha_term * (2 ** s)
+    )
+    best_witness = best_witness_by_size[chosen_size]
+
+    valid_patterns, leak = _majority_rule(trigger, validity, best_witness)
+    return best_witness, valid_patterns, leak
+
+
 @dataclass
 class TruncatedMixerConstruction:
     construction: MixerConstruction
@@ -196,6 +334,8 @@ def build_truncated_witness_mixer(
     search_attempts_per_size: int = 60,
     seed: int = 0,
     cost_alpha: float = 0.01,
+    adaptive: bool = False,
+    gain_price: float = 0.01,
 ) -> TruncatedMixerConstruction:
     """Same candidate-pair selection loop as `mixer.build_matroid_mixer`
     (union-find over which (e,f) pairs connect new components), but every
@@ -214,18 +354,22 @@ def build_truncated_witness_mixer(
     every time -- see `docs/bounded-witness-mixer.md`). Size 2 costs much
     less and still catches the genuinely cheap exact cases.
 
-    `cost_alpha` defaults to `0.01`, not `0.0`. This was changed after
-    `docs/bounded-witness-mixer.md`'s circuit-cost investigation found the
-    original cost-blind default produced circuits costing 16-38x more
-    than necessary for no proportional safety benefit -- see
-    `_search_truncated_witness`'s docstring for the mechanism, and
-    `docs/bounded-witness-mixer.md`'s "Making the search cost-aware"
-    section for the empirical comparison across `cost_alpha` values that
-    led to this specific number (it consistently sat at or near the point
-    that dominates a fixed-cap approach: comparable-or-better safety at a
-    fraction of the cost, across every density and network size tested;
-    a pure `cost_alpha=0.0` reproduces the original, more expensive
-    behavior exactly if that's ever wanted for comparison)."""
+    `adaptive=False` (default) uses the fixed-`cost_alpha` penalty.
+    `adaptive=True` tries `_search_truncated_witness_adaptive` instead --
+    a PER-TERM effective alpha (`gain_price` divided by how much THIS
+    term actually has left to gain from a wider witness) that looked, on
+    an initial sweep, like it dominated a fixed global `cost_alpha`. It
+    doesn't, once fully validated: re-measured after the never-fire fix
+    below (which the initial sweep predates), `adaptive=True` costs MORE
+    than `cost_alpha=0.01` on most of the escalating-realism ladder
+    (2-7x, e.g. `long_log`/`long_linear` at n_nodes=30-100), not less --
+    the per-term formula turned out to be MORE prone to the never-fire
+    shortcut than one shared coefficient, not less, because its
+    `alpha_term` inflates whenever a term's OWN achievable gain looks
+    small, which the never-fire option itself makes look smaller than it
+    is. Kept available for comparison and further investigation, not
+    because it's recommended -- `docs/bounded-witness-mixer.md` documents
+    this as a real, instructive dead end, not a working improvement."""
     n_qubits = graph.n_edges
     index_of: Dict[int, int] = {mask: i for i, mask in enumerate(trees)}
     tree_set = set(trees)
@@ -289,10 +433,17 @@ def build_truncated_witness_mixer(
                 )
                 if not candidate_pool:
                     candidate_pool = tuple(q for q in range(n_qubits) if q not in (e, f))
-                approx_witness, approx_patterns, leak = _search_truncated_witness(
-                    trigger, validity, candidate_pool, max_witness_size, rng,
-                    attempts_per_size=search_attempts_per_size, cost_alpha=cost_alpha,
-                )
+                if adaptive:
+                    approx_witness, approx_patterns, leak = _search_truncated_witness_adaptive(
+                        trigger, validity, candidate_pool, max_witness_size, rng,
+                        attempts_per_size=search_attempts_per_size,
+                        gain_price=gain_price,
+                    )
+                else:
+                    approx_witness, approx_patterns, leak = _search_truncated_witness(
+                        trigger, validity, candidate_pool, max_witness_size, rng,
+                        attempts_per_size=search_attempts_per_size, cost_alpha=cost_alpha,
+                    )
                 minimized_cubes = _minimize_patterns(len(approx_witness), approx_patterns)
                 terms.append(ExchangeTerm(e=e, f=f, witness_qubits=approx_witness, valid_patterns=approx_patterns, minimized_cubes=minimized_cubes))
                 term_info.append(TruncatedTermInfo(e=e, f=f, is_exact=False, leakage_rate=leak, candidate_pool_size=len(candidate_pool)))
