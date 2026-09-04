@@ -335,14 +335,26 @@ def find_witness_set(
     validity: Dict[int, bool] = {t: ((t ^ swap_mask) in tree_set) for t in trigger}
 
     def try_brute_force() -> Tuple[Optional[Tuple[int, ...]], Optional[Tuple[Tuple[int, ...], ...]]]:
-        trigger_arr = np.array(trigger, dtype=np.int64)
+        # Individual bits extracted via Python-level `(t >> q) & 1` first,
+        # NOT `np.array(trigger, dtype=np.int64)` -- tree bitmasks exceed
+        # 2**63 once n_qubits > 63 (Python ints handle this fine; numpy
+        # int64 overflows outright: `OverflowError: Python int too large to
+        # convert to C long`). Found while pushing a downstream project's
+        # port of this construction past 63 qubits -- this repo's own
+        # tested instances never reached that scale (the real 33-bus case
+        # tops out at 37 qubits), so it went unnoticed here, but the same
+        # crash is latent for any future scaling push past 63. Only the
+        # RESULTING 0/1 bit values -- always small regardless of mask size
+        # -- go into numpy, preserving the original vectorized speed for
+        # the actual combinatorial search.
         validity_arr = np.array([validity[t] for t in trigger], dtype=np.int64)
         other_qubits = [q for q in range(n_qubits) if q not in (e, f)]
+        bit_cols = {q: np.array([(t >> q) & 1 for t in trigger], dtype=np.int64) for q in other_qubits}
         for size in range(0, max_size + 1):
             for subset in itertools.combinations(other_qubits, size):
-                key = np.zeros(len(trigger_arr), dtype=np.int64)
+                key = np.zeros(len(trigger), dtype=np.int64)
                 for i, q in enumerate(subset):
-                    key |= ((trigger_arr >> np.int64(q)) & 1) << i
+                    key |= bit_cols[q] << i
                 combined = key * 2 + validity_arr
                 uniq_keys, first_idx = np.unique(key, return_index=True)
                 if len(np.unique(combined)) == len(uniq_keys):
