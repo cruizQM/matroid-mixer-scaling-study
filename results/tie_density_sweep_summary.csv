@@ -1,0 +1,6 @@
+k_ties,n_qubits,n_seeds,max_witness_size_mean,max_witness_size_median,max_witness_size_max,n_spanning_trees_mean,n_spanning_trees_median,n_spanning_trees_max,dropped_candidates_mean,dropped_candidates_median,dropped_candidates_max,n_terms_mean,n_terms_median,n_terms_max,any_disconnected
+2,9,4,0.75,0.5,2,9.25,9.0,11,0,0.0,0,4.25,4.0,5,False
+4,11,4,3,3.0,4,57.5,51.5,87,0,0.0,0,7.75,7.5,9,False
+6,13,4,3.25,4.0,4,286.75,248.5,465,39.5,40.5,71,6.5,6.0,11,True
+8,15,4,2,1.5,4,1172.75,1262.0,1339,73.5,91.5,101,6,4.0,14,True
+10,17,4,0.75,1.0,1,3348,3579.5,4181,129.75,133.0,136,1.75,2.0,3,True
