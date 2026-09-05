@@ -142,13 +142,27 @@ transcribed here by mistake at some point after section 5 repurposed
 already matched the fixed-`cost_alpha` data. See "Methodology mistakes,
 made and caught" below.)
 
-**The pattern**: cost roughly plateaus by `n_nodes=60` in every
-condition rather than continuing to grow — placement (short vs. long
-range) drives the cost LEVEL (short: hundreds to low thousands; long:
-several thousand to low tens of thousands), growth rate (log vs. linear)
-matters far less than placement does, and the mixer stays fully
-connected at every single point tested. Variance is high at the smallest
-size (`n_nodes=10`, coefficient of variation 50-65%+) and drops to a
+**The pattern**: cost settles into a plateau by `n_nodes=60` in every
+condition rather than continuing to grow — but for `short_log`, it gets
+there by PEAKING at `n_nodes=30` first (4,404 CX, above the eventual
+2,600-3,200 CX plateau), not by ramping smoothly into it. Checked
+directly, not left as an unexplained bump: at `n_nodes=30`, only 0-23%
+of exchange terms come out "free" (zero-width, no conditioning needed at
+all) across the 3 seeds, versus 30-43% by `n_nodes=60` — `n_qubits=34`
+is already large enough to generate a real term count (13-15 terms,
+unlike `n_nodes=10`'s trivial 5-6), but not yet large enough relative to
+`k_ties=5` for the ties' fundamental cycles to stop reaching most of the
+graph (`k_ties/n_qubits` = 5/34 ≈ 0.15 at `n=30` vs. 6/65 ≈ 0.09 at
+`n=60` — a real dilution that just hasn't happened yet). Coefficient of
+variation at this peak is only 7.9% -- tight, not an outlier-driven
+spike -- so this is a genuine property of the generator at this size,
+not something more seeds would average away.
+Placement (short vs. long range) drives the cost LEVEL (short: hundreds
+to low thousands; long: several thousand to low tens of thousands),
+growth rate (log vs. linear) matters far less than placement does, and
+the mixer stays fully connected at every single point tested. Variance
+is high at the smallest size (`n_nodes=10`, coefficient of variation
+50-65%+) and drops to a
 much tighter band by `n_nodes≥60` — "small variance" is real, but only
 past a floor size.
 

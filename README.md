@@ -256,10 +256,14 @@ long-range generator far better than the short-range one) and tie-count
 growth (log-scaled, `k_ties(n) ≈ 1.43 ln n` — real and benchmark networks
 show the ties-per-bus ratio dropping 6x from 15 to 179 buses, consistent
 with log growth — `docs/scaling-ladder-and-decomposition.md` §9). Across
-that ladder, technique 2 (whole-graph, no decomposition) plateaus by
-`n_nodes=60` and stays fully connected throughout (§2) — a complete
-fault-tolerant-ready construction on its own, but, as the table above
-already shows, well past a comfortable NISQ regime at these sizes.
+that ladder, technique 2 (whole-graph, no decomposition) settles into a
+plateau by `n_nodes=60` and stays fully connected throughout — but for
+short-range ties it peaks at `n_nodes=30` first, a real, reproducible
+effect (7.9% seed-to-seed variance, not noise) traced to exactly how
+many exchanges still need conditioning at all at that size (§2) — a
+complete fault-tolerant-ready construction on its own either way, but,
+as the table above already shows, well past a comfortable NISQ regime
+at these sizes.
 Technique 3 fixes that without exception on this data — at every size
 ≥ 30 nodes, every seed, both conditions, zone decomposition (3a) alone
 already costs less than the whole-graph construction (4.2x-41.5x
