@@ -48,13 +48,16 @@ order:
     across the full synthetic ladder.
 
 Every numeric claim below was re-measured after every code fix mentioned
-in this document was already in place — two SEPARATE earlier drafts of
+in this document was already in place — three SEPARATE earlier drafts of
 this investigation each compared numbers across a code change without
-re-running both sides, and each produced a wrong conclusion as a result
-("adaptive alpha wins" once, "decomposition sometimes loses" the other
-time). See "Methodology mistakes, made and caught" near the end for what
-both looked like and how they were caught, since that's as much a part
-of this repo's discipline as any of the numbers.
+re-running (or re-pointing to) both sides, and each produced a wrong
+conclusion as a result ("adaptive alpha wins" once, "decomposition
+sometimes loses" the second time, and a stale whole-graph baseline
+silently inflating section 6's dominance numbers and reaching the
+top-level README the third time, caught only during a later full-repo
+review). See "Methodology mistakes, made and caught" near the end for
+what all three looked like and how they were caught, since that's as
+much a part of this repo's discipline as any of the numbers.
 
 ## 1. Is headline result 1's flat-tie-count assumption load-bearing?
 
@@ -117,17 +120,27 @@ At each size, a walked-exchange-graph sample
 intractable at these densities) feeds
 `truncated_mixer.build_truncated_witness_mixer` at `cost_alpha=0.01`
 (this repo's validated default — see section 4 for why NOT the adaptive
-variant). Reproduce: `python scripts/run_cost_aware_scaling_ladder.py`.
+variant). Reproduce: `python scripts/run_fixed_alpha_ladder.py` (NOT
+`run_cost_aware_scaling_ladder.py` — that script's own name is the
+original one, but section 5 below later repurposed it to measure the
+ADAPTIVE variant specifically, and its output file kept the same name;
+`run_fixed_alpha_ladder.py` was added alongside that repurposing to keep
+a fixed-`cost_alpha` baseline reproducible under its own name).
 
 | condition | n_nodes=10 | 30 | 60 | 100 | 150 |
 |---|---|---|---|---|---|
-| short_log | 264 | 1,303 | 3,191 | 2,592 | 2,745 |
+| short_log | 264 | 4,404 | 3,191 | 2,592 | 2,745 |
 | short_linear | 88 | 4,404 | 1,349 | 1,080 | 1,351 |
 | long_log | 3,303 | 3,452 | 11,504 | 9,921 | 10,712 |
 | long_linear | 4,182 | 3,452 | 11,980 | 10,431 | 13,273 |
 
-(mean CX over 3 seeds; `results/cost_aware_scaling_ladder_results.csv`
-has per-seed detail and depth.)
+(mean CX over 3 seeds; `results/fixed_alpha_ladder_results.csv` has
+per-seed detail and depth. This table's `short_log, n_nodes=30` cell
+previously read 1,303 -- that was the ADAPTIVE variant's number,
+transcribed here by mistake at some point after section 5 repurposed
+`run_cost_aware_scaling_ladder.py`; every other cell in this table
+already matched the fixed-`cost_alpha` data. See "Methodology mistakes,
+made and caught" below.)
 
 **The pattern**: cost roughly plateaus by `n_nodes=60` in every
 condition rather than continuing to grow — placement (short vs. long
@@ -390,40 +403,41 @@ Reproduce: `python scripts/run_decomposed_cost_aware_ladder.py`.
 
 Comparing decomposed (`cost_alpha=0.01` per subproblem) against the
 whole-graph construction from section 2, both measured under IDENTICAL,
-current code (see section 7 below for why that qualifier matters —
-an earlier version of this table used a decomposed baseline that was
-silently running the rejected adaptive search inside each zone):
+current code (see section 7 below for why that qualifier matters — an
+earlier version of this table used a decomposed baseline that was
+silently running the rejected adaptive search inside each zone; a
+SEPARATE issue, found later and corrected here, is that this table's
+whole-graph side was itself pulling from `cost_aware_scaling_ladder_summary.csv`
+-- the adaptive dataset -- rather than the fixed-`cost_alpha` baseline
+section 2 actually reports; see "Methodology mistakes, made and caught"):
 
 | condition | n=10 | n=30 | n=60 | n=100 | n=150 |
 |---|---|---|---|---|---|
-| short_log | ties | 5.6x | 14.4x | 18.7x | **26.4x** |
-| long_log | 0.44x (worse) | 35.2x | 8.3x | 46.7x | 4.9x |
+| short_log | ties | 18.9x | 17.2x | 20.9x | **30.7x** |
+| long_log | ~1.1x | 7.0x | 4.2x | **41.5x** | 4.8x |
 
 (cost reduction from decomposing, mean CX over 3 seeds;
 `results/decomposed_cost_aware_ladder_summary.csv` /
-`results/cost_aware_scaling_ladder_summary.csv`. `short_linear`/
-`long_linear` are no longer the default conditions — see section 9 —
-but the same comparison on them, kept as a stress-test data point, shows
-the identical pattern: decomposition wins every seed at `n_nodes>=30`.)
+`results/fixed_alpha_ladder_summary.csv` — both the fixed-`cost_alpha`
+default, a fair like-for-like comparison. `short_linear`/`long_linear`
+are no longer the default conditions — see section 9 — but the same
+comparison on them, kept as a stress-test data point, shows the
+identical pattern: decomposition wins every seed at `n_nodes>=30`.)
 
-`long_log`'s ratio swings widely by size (4.9x to 46.7x) — real
+`long_log`'s ratio swings widely by size (4.2x to 41.5x) — real
 seed-to-seed variance on only 3 seeds per point, not a sign the
-technique is unreliable: **per-seed data
-(`results/best_of_both_ladder_results.csv`) shows decomposition winning
-EVERY SINGLE SEED at every size >= 30, for both conditions, without
-exception** — the swings are in how much it wins by, not whether it
-wins. At `n_nodes=10`, `long_log` shows decomposition looking WORSE
-(0.44x) — this is a real, but different, effect, not decomposition
-failing: with only one zone at this size (`target_zone_size=8` →
-`round(10/8)=1`), decomposition should reduce to the identical
-construction, but the two measurement paths use different tree inputs
-(the whole-graph ladder uses a walked-exchange-graph SAMPLE; the
-decomposed path uses EXACT enumeration whenever affordable, which it is
-at this size) — comparing them at `n_nodes=10` is actually comparing two
-different-but-valid inputs to the same search, not measuring
-decomposition's own effect. At `n_nodes=30` and up, both zones and the
-assembly graph are genuinely non-trivial, and the comparison is a fair
-one.
+technique is unreliable: **direct per-seed comparison
+(`results/fixed_alpha_ladder_results.csv` vs.
+`results/decomposed_cost_aware_ladder_results.csv`) shows decomposition
+winning EVERY SINGLE SEED at every size >= 30, for both conditions,
+without exception** — the swings are in how much it wins by, not
+whether it wins. At `n_nodes=10`, the two constructions are within noise
+of each other (short_log: an exact tie, since `target_zone_size=8` →
+`round(10/8)=1` zone, reducing decomposition to the identical
+construction; long_log: decomposed costs about 12% less, roughly a
+wash) — with only one zone at this size, decomposition isn't really
+being tested yet. At `n_nodes=30` and up, both zones and the assembly
+graph are genuinely non-trivial, and the comparison is a fair one.
 
 **Practical consequence**: decompose whenever the graph splits into more
 than one zone — that's the recommended construction:
@@ -598,9 +612,11 @@ before it, both pick a `target_zone_size` up front (fixed, or
 density-scaled) and hope the result is cheap. It usually is, but not
 reliably: measuring the actual variance in section 6/8's own results
 found decomposed cost's coefficient of variation reaching 99% at some
-sizes (`long_log`, `n_nodes=100`) -- far WORSE than the whole-graph
-construction's own variance, which shrinks smoothly with size (55% down
-to 5%). The reason: decomposition trades one big averaging problem for
+sizes (`long_log`, `n_nodes=100`) -- consistently WORSE than the
+fixed-`cost_alpha` whole-graph construction's own variance at every
+tested size (4-35% across `n_nodes` 30-150, noisy rather than a clean
+downward trend, but never approaching decomposed's own extremes). The
+reason: decomposition trades one big averaging problem for
 `n_zones` small independent ones, and a single "unlucky" zone (one
 concrete case: 3,550 of a 3,566-CX subtotal from ONE zone of 19) can
 dominate a seed's total when there aren't yet enough zones for that to
@@ -744,6 +760,33 @@ taking as a standing risk in this kind of iterative work, not a one-off
 -- re-running dependents after any change to shared code
 (`truncated_mixer.py`, `zone_decomposition.py`) is now treated as
 mandatory, not optional, for exactly this reason.
+
+**A third instance, same underlying pattern, found much later (during a
+full-repo review, not by anyone re-deriving these specific numbers):**
+`run_cost_aware_scaling_ladder.py` was originally the script behind
+section 2's whole-graph table, at the fixed `cost_alpha=0.01` default.
+Section 5 later repurposed this SAME script to measure the adaptive
+variant instead, adding a companion script (`run_fixed_alpha_ladder.py`)
+to keep the fixed baseline separately reproducible -- necessary and
+correct on its own, but section 2's own table, section 6's whole-graph
+comparison, and the README figures built from
+`results/cost_aware_scaling_ladder_summary.csv` were never re-pointed at
+the new file, silently becoming comparisons against the wrong
+(adaptive) construction. Unlike the first two instances, this one sat
+undetected for long enough to reach the top-level README before being
+caught -- not because the effect was small (short_log's whole-graph cost
+at `n_nodes=30` is 4,404 CX fixed vs. 1,303 CX adaptive, a 3.4x gap) but
+because nothing about the resulting numbers looked obviously wrong on
+their own; both are plausible costs for a whole-graph construction, and
+only comparing directly against the file that was SUPPOSED to be cited
+surfaced the mismatch. Section 2's table, section 6's ratio table and
+per-seed win claim, section 11's whole-graph variance characterization,
+and the README's Results section and its three affected figures were
+all corrected. The standing lesson from all three instances together:
+a script's OWN past behavior is not a safe assumption once any later
+section of the same investigation says it was repurposed -- re-verify
+against the file actually being read, not the name of the script that
+originally produced it.
 
 ## Honest scope of this document
 

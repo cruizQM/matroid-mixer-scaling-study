@@ -262,7 +262,7 @@ fault-tolerant-ready construction on its own, but, as the table above
 already shows, well past a comfortable NISQ regime at these sizes.
 Technique 3 fixes that without exception on this data — at every size
 ≥ 30 nodes, every seed, both conditions, zone decomposition (3a) alone
-already costs less than the whole-graph construction (5.6x-46.7x
+already costs less than the whole-graph construction (4.2x-41.5x
 cheaper), and its cost-capped refinement (3b) guarantees the rest of the
 way: every seed, every condition, every size tested, lands under 500 CX
 (§6-8):
