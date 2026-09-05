@@ -2,41 +2,19 @@
 
 ## The question
 
-For the constraint "the selected edges form a spanning tree of the graph"
-(a basis of its graphic matroid), does a QAOA mixer that preserves that
-constraint exactly — rather than enforcing it with a penalty term in the
-cost function — compile into a circuit whose gate count and depth scale
-favorably with graph size, for sparse graphs resembling real distribution
-feeders? And if the direct answer turns out to be "not on real topology,
-not without help": can something be built that still solves the problem
-exactly, cheaply enough to matter on both fault-tolerant and near-term
-(NISQ) hardware?
+Can a QAOA mixer that never wastes search on infeasible configurations —
+no penalty terms, no loops, just valid moves — scale to real electrical
+grids, cheaply enough for both fault-tolerant and near-term (NISQ)
+quantum hardware?
 
-This is narrower than general worst-case graphs, where basis-exchange
-move sets can blow up exponentially; it is the graph class relevant to
-feeder reconfiguration, where the network is sparse (a radial backbone
-plus a small number of tie switches) and close to planar. A
-constraint-preserving mixer restricts QAOA's search to the feasible
-subspace directly, instead of relying on a penalty coefficient in the
-cost Hamiltonian to discourage infeasible states — trading a larger,
-structured mixer circuit for a smaller effective search space and no
-penalty-weight tuning. This repo answers whether that trade is cheap
-enough, empirically, to be worth making for this problem class.
-
-**Short answer**: not for free. The direct construction works cleanly on
-a synthetic sparse-feeder family, but fails outright on real, published
-topology (the IEEE 33-bus feeder) — genuinely infeasible witness sizes,
-not a tunable search limit. Two things fix it: **zone decomposition**
-(splits the constraint into small, exactly-solvable pieces, provably
-lossless) and a **cost-aware bounded-witness mixer** (bounds circuit cost
-directly, at a small, measured leakage cost). Together they produce two
-things, not one: an **exact** construction, already sufficient for a
-fault-tolerant device that doesn't need to care about gate count, and,
-via decomposition and a further cost-capped refinement, a **NISQ-plausible**
-construction with small, measured (non-zero) leakage — both validated
-directly on two real networks, not just synthetic proxies, with the same
-"more refinement, never more cost" pattern holding on every network
-tested (see "Results" below).
+**Yes — with the right techniques.** Built directly, the mixer works
+cleanly on synthetic feeders but fails outright on real, published
+topology. Two fixes close that gap: **zone decomposition** (splits the
+problem into small, exactly-solvable pieces) and a **cost-aware
+bounded-witness mixer** (bounds circuit cost directly, at a small,
+measured leakage price). Together they give both a fault-tolerant-ready
+exact construction and a NISQ-ready cheap one — validated directly on
+two real networks, not just synthetic proxies (see "Results" below).
 
 ## The strategy, at a glance
 
