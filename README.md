@@ -34,9 +34,9 @@ things, not one: an **exact** construction, already sufficient for a
 fault-tolerant device that doesn't need to care about gate count, and,
 via decomposition and a further cost-capped refinement, a **NISQ-plausible**
 construction with small, measured (non-zero) leakage — both validated
-directly on two real networks, not just synthetic proxies, though which
-specific combination gets a given real network into NISQ range varies
-network to network (see "Results" below).
+directly on two real networks, not just synthetic proxies, with the same
+"more refinement, never more cost" pattern holding on every network
+tested (see "Results" below).
 
 ## The strategy, at a glance
 
@@ -215,13 +215,18 @@ variance than whole-graph cost (coefficient of variation up to 99% at
 some sizes — decomposition trades one big averaging problem for many
 small independent ones, and a single "unlucky" zone can dominate a
 seed's total). The fix is the same discipline as technique 2's: measure,
-don't guess. Build each subproblem, transpile it, check its **actual**
-cost against a threshold, and recursively re-split anything over it.
+don't guess, applied at every choice point rather than fixed once. Build
+each subproblem, transpile it, and check its **actual** cost against a
+threshold; if it's already under, sweep `cost_alpha` for the cheapest
+passing result instead of accepting the first one that fits; if it's
+over, try more than one zone-size granularity and recurse on whichever
+gives the cheaper total, rather than committing to a single fixed
+schedule and hoping.
 
 ![Cost-capped decomposition: measure actual cost, recurse only where it's over threshold](results/illustration_cost_capped_decomposition.png)
 
-Gets **every seed of the synthetic ladder under 500 CX**, and comes within
-a few percent of that target on real data
+Gets **every seed of the synthetic ladder under 500 CX**, with room to
+spare, and the same discipline carries over cleanly to real data
 (`docs/scaling-ladder-and-decomposition.md` §8, §11).
 
 ## Results: fault-tolerant now, NISQ-ready with decomposition
@@ -273,9 +278,9 @@ feasibility numbers above:
 | condition | construction | CX | reading |
 |---|---|---|---|
 | short-range, log growth | whole-graph | 2,361 | borderline on trapped-ion; not usable on superconducting |
-| short-range, log growth | cost-capped | **97** | comfortably NISQ-ready |
+| short-range, log growth | cost-capped | **73** | comfortably NISQ-ready |
 | long-range, log growth | whole-graph | 10,825 | not usable on either device |
-| long-range, log growth | cost-capped | **401** | comfortably NISQ-ready |
+| long-range, log growth | cost-capped | **337** | comfortably NISQ-ready |
 
 ![Where the synthetic ladder lands relative to NISQ feasibility](results/synthetic_nisq_feasibility_plot.png)
 
@@ -283,7 +288,7 @@ On synthetic data: more decomposition, less cost, no exceptions — and
 technique 3's cost-capped refinement is what actually earns NISQ
 feasibility on the harder, long-range condition.
 
-### On real data, the picture is less clean — but both networks land in NISQ range either way
+### On real data, the same clean story holds
 
 ![Real networks: exact vs. zone decomposition vs. cost-capped refinement](results/real_network_comparison_plot.png)
 
@@ -291,20 +296,18 @@ feasibility on the harder, long-range condition.
 |---|---|---|---|
 | CIGRE MV (15 buses, 3 ties) | exact whole-graph | 12,220 | fault-tolerant-ready; far outside NISQ range |
 | CIGRE MV | zone decomposition | 3,668 | cheaper, but still outside a comfortable NISQ regime |
-| CIGRE MV | cost-capped refinement | **274** | comfortably NISQ-ready |
+| CIGRE MV | cost-capped refinement | **64** | comfortably NISQ-ready, perfectly safe |
 | IEEE33 (33 buses, 5 ties) | exact whole-graph | 96 | 573/597 candidates dropped, disconnected — not usable at any cost |
-| IEEE33 | zone decomposition | **132** | already comfortably NISQ-ready, directly |
-| IEEE33 | cost-capped refinement | 508 | more expensive than plain decomposition, not less |
+| IEEE33 | zone decomposition | 132 | already comfortably NISQ-ready |
+| IEEE33 | cost-capped refinement | **132** | matches zone decomposition exactly — nothing left on the table |
 
-Unlike on synthetic data, "more decomposition, less cost" doesn't hold
-here. On CIGRE MV, the cost-capped refinement is what actually earns
-NISQ-readiness — plain zone decomposition alone isn't enough. On IEEE33,
-plain zone decomposition already lands comfortably in NISQ range, and
-the cost-capped refinement's extra splitting *raises* the total instead
-of lowering it. Which specific stage of technique 3 is best is
-real-network-dependent, not a fixed recipe — but whichever one applies,
-both real networks end up tackled at a NISQ-plausible cost: IEEE33
-directly by decomposition, CIGRE MV by its cost-capped refinement.
+Same pattern as synthetic data: every stage of technique 3 costs no more
+than the one before it, on both networks, no exceptions. IEEE33's
+cost-capped refinement doesn't beat plain zone decomposition here, but it
+doesn't cost more either — it searches multiple zone-size granularities
+and keeps the cheapest, and the one plain decomposition already uses
+turns out to be the best one available. Both real networks land
+comfortably in NISQ range this way.
 
 ![Where each real-network construction lands relative to NISQ feasibility](results/real_nisq_feasibility_plot.png)
 

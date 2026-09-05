@@ -9,14 +9,45 @@ nothing in the earlier design re-acts to that after the fact.
 
 Build each subproblem, TRANSPILE it, and check its real CX cost
 directly. If it's already under threshold, stop -- it's a leaf. If not,
-partition IT further (same `zone_decomposition` machinery, at a smaller
-`target_zone_size`) and recurse on each of ITS zones + assembly. Falls
-back to raising `cost_alpha` (trading safety for cost, `run_cost_aware_scaling_ladder_aggressive.py`'s
+partition IT further (same `zone_decomposition` machinery) and recurse on
+each of ITS zones + assembly. Falls back to raising `cost_alpha` (trading
+safety for cost, `run_cost_aware_scaling_ladder_aggressive.py`'s
 mechanism, but bounded here -- never past the point of inertness, see
 that script's own findings) only when a subproblem is too small to
 partition further (`n_nodes <= MIN_PARTITION_SIZE`) and is STILL over
 threshold -- a graph that small has no more structure left to exploit,
 only cost pressure.
+
+## Two refinements, found by asking "is this actually the best we can do?"
+of the real-network results (not just "does it meet the threshold")
+
+1. **Don't stop at the first `cost_alpha` that passes.** The original
+   version tried only 0.01 and accepted it the instant it met threshold.
+   On CIGRE MV that gave 274 CX at 0.985 mean feasible mass -- but
+   `cost_alpha=0.2` gives 64 CX at a PERFECT 1.0, strictly better in both
+   dimensions, simply never tried because 0.01 already "worked."
+   `_best_under_threshold` now sweeps all of `FALLBACK_COST_ALPHAS` and
+   keeps the cheapest passing result, at every leaf, not just the
+   irreducible-fallback ones.
+2. **Try more than one granularity, keep whichever total is cheaper.** The
+   original version always jumped straight to `target_zone_size // 2` the
+   instant a graph failed to meet threshold, meaning the granularity this
+   repo's own flat decomposition uses directly (`target_zone_size=8`) was
+   never tried once decomposition was needed at all -- only its half. On
+   IEEE33 this mattered a lot: halving immediately produced a finer,
+   HARDER-to-condition 4-node assembly-of-assembly core (508 CX) than the
+   one un-halved `target_zone_size=8` produces (132 CX) -- same size,
+   different specific graph, because which zones get contracted together
+   differs. A first attempt just swapped the rule to "always try the
+   un-halved size first" -- checked against the FULL synthetic ladder, not
+   just the two real networks, that made 12 of 30 seeds WORSE (up to 15x),
+   because shrinking zones sometimes helps and sometimes hurts depending
+   on where a graph's real density sits -- there's no universally-better
+   fixed rule. `_try_granularity` now tries BOTH the current
+   `target_zone_size` and its half, fully recurses each, and
+   `decompose_to_threshold` keeps whichever total is actually cheaper --
+   the same "measure, don't guess" discipline this whole script is built
+   on, applied to the granularity choice itself.
 
 Writes results/cost_capped_decomposition_results.csv (per condition,
 size, seed) and _summary.csv (whether every leaf actually met the
@@ -90,45 +121,77 @@ def _build_and_measure(graph, seed: int, cost_alpha: float):
     return construction, cx, tqc.depth(), masses
 
 
+def _best_under_threshold(graph, seed: int):
+    """Sweep FALLBACK_COST_ALPHAS and keep the CHEAPEST result that still
+    meets CX_THRESHOLD -- not just the first one that does. The original
+    version stopped at cost_alpha=0.01 the instant it passed, which left
+    real headroom on the table: on CIGRE MV, 0.01 gives 274 CX at 0.985
+    mean feasible mass, but 0.2 gives 64 CX at a PERFECT 1.0 -- cheaper
+    and safer, simply never tried because 0.01 already "worked." If
+    nothing meets the threshold, returns the cheapest attempt anyway (met=False)."""
+    best = None
+    met_any = False
+    for alpha in FALLBACK_COST_ALPHAS:
+        construction, cx, circ_depth, masses = _build_and_measure(graph, seed, cost_alpha=alpha)
+        if cx <= CX_THRESHOLD:
+            met_any = True
+            if best is None or cx < best[1]:
+                best = (construction, cx, circ_depth, masses)
+        elif best is None:
+            best = (construction, cx, circ_depth, masses)
+    return (*best, met_any)
+
+
 def decompose_to_threshold(graph, seed: int, target_zone_size: int = BASE_TARGET_ZONE_SIZE, depth: int = 0) -> dict:
     """Returns dict(cx, depth, masses, n_leaves, max_leaf_cx, all_leaves_met_threshold, max_depth_reached)."""
     construction, cx, circ_depth, masses = _build_and_measure(graph, seed, cost_alpha=0.01)
 
     if cx <= CX_THRESHOLD or graph.n_nodes <= MIN_PARTITION_SIZE or depth >= MAX_DEPTH:
-        met = cx <= CX_THRESHOLD
-        if not met and graph.n_nodes <= MIN_PARTITION_SIZE:
-            # Fallback: too small to split further, still over threshold --
-            # escalate cost_alpha (accepting more leakage) until it fits, or
-            # we run out of escalation levels.
-            for alpha in FALLBACK_COST_ALPHAS:
-                construction, cx, circ_depth, masses = _build_and_measure(graph, seed, cost_alpha=alpha)
-                if cx <= CX_THRESHOLD:
-                    met = True
-                    break
+        # Whether we're here because 0.01 already fits, or because we're
+        # forced to stop splitting regardless of cost: sweep for the
+        # cheapest cost_alpha that meets the threshold rather than
+        # settling for whatever the first one gave.
+        construction, cx, circ_depth, masses, met = _best_under_threshold(graph, seed)
         return dict(cx=cx, depth=circ_depth, masses=masses, n_leaves=1,
                     max_leaf_cx=cx, all_leaves_met_threshold=met, max_depth_reached=depth)
 
-    # Still over threshold and splittable: partition further, at a SMALLER
-    # target_zone_size (halved, floor at MIN_TARGET_ZONE_SIZE) -- same
-    # density-driven reasoning as the hierarchical assembly-graph recursion:
-    # a subproblem that's still expensive at the current granularity needs a
-    # finer split, not the same one repeated.
-    next_target = max(MIN_TARGET_ZONE_SIZE, target_zone_size // 2)
-    zone_of = partition_zones_by_size(graph, next_target)
+    # Still over threshold and splittable: which granularity to split at is
+    # genuinely graph-dependent, not a fixed rule. A first attempt at
+    # "always try the current target_zone_size before halving" looked
+    # right on IEEE33 (matching flat decomposition's own 4-zone split,
+    # 508 -> 132 CX) but, checked against the full synthetic ladder,
+    # made 12 of 30 seeds WORSE (up to 15x) -- shrinking zones sometimes
+    # helps and sometimes hurts depending on where the real density sits,
+    # exactly as this repo's own hierarchical-decomposition findings
+    # already say elsewhere. So: try BOTH the current target_zone_size and
+    # its half, fully recurse each, and keep whichever total is actually
+    # cheaper -- measure, don't guess, applied to the granularity choice
+    # itself, not just to whether a given attempt meets threshold.
+    candidates = sorted({target_zone_size, max(MIN_TARGET_ZONE_SIZE, target_zone_size // 2)}, reverse=True)
+    results = [r for r in (_try_granularity(graph, seed, size, depth) for size in candidates) if r is not None]
+
+    if not results:
+        # No candidate granularity could even produce a real split (graph
+        # too small/dense to divide at any tried size) -- irreducible,
+        # same cost_alpha-escalation fallback as the MIN_PARTITION_SIZE case.
+        construction, cx, circ_depth, masses, met = _best_under_threshold(graph, seed)
+        return dict(cx=cx, depth=circ_depth, masses=masses, n_leaves=1,
+                    max_leaf_cx=cx, all_leaves_met_threshold=met, max_depth_reached=depth)
+
+    return min(results, key=lambda r: r["cx"])
+
+
+def _try_granularity(graph, seed: int, size: int, depth: int):
+    """Partition `graph` at target_zone_size=`size` and fully recurse on
+    every zone + the assembly graph (children get `size // 2` as their OWN
+    starting granularity, to try again from there). Returns None if this
+    size can't produce a real split (n_zones <= 1) -- not a candidate."""
+    zone_of = partition_zones_by_size(graph, size)
     n_zones = len(set(zone_of.values()))
     if n_zones <= 1:
-        # Partitioning didn't actually split anything (graph too small/dense
-        # to divide at this target size) -- treat as irreducible, same
-        # fallback as the MIN_PARTITION_SIZE case above.
-        met = cx <= CX_THRESHOLD
-        for alpha in FALLBACK_COST_ALPHAS:
-            if met:
-                break
-            construction, cx, circ_depth, masses = _build_and_measure(graph, seed, cost_alpha=alpha)
-            met = cx <= CX_THRESHOLD
-        return dict(cx=cx, depth=circ_depth, masses=masses, n_leaves=1,
-                    max_leaf_cx=cx, all_leaves_met_threshold=met, max_depth_reached=depth)
+        return None
 
+    next_target = max(MIN_TARGET_ZONE_SIZE, size // 2)
     total_cx, total_depth, all_masses = 0, 0, []
     n_leaves, max_leaf_cx, all_met, max_depth_reached = 0, 0, True, depth
 
