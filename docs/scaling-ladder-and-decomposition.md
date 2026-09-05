@@ -434,9 +434,16 @@ section 2 actually reports; see "Methodology mistakes, made and caught"):
 `results/decomposed_cost_aware_ladder_summary.csv` /
 `results/fixed_alpha_ladder_summary.csv` — both the fixed-`cost_alpha`
 default, a fair like-for-like comparison. `short_linear`/`long_linear`
-are no longer the default conditions — see section 9 — but the same
-comparison on them, kept as a stress-test data point, shows the
-identical pattern: decomposition wins every seed at `n_nodes>=30`.)
+are no longer the default conditions — see section 9 — and checking the
+same per-seed comparison against them, using the historical fixed-alpha
+data from before that file was trimmed to the log-growth conditions
+(git commit `3121bba~1`), does NOT show the identical pattern:
+`long_linear` wins every seed at `n_nodes>=30` (12/12), but
+`short_linear` only wins 8 of 12, losing at `n_nodes=100 seed=0` and
+every seed at `n_nodes=150`. The stress-test conditions are kept in this
+document for the mechanism discussion in sections 7-9, not as a second
+proof of decomposition's benefit — that proof rests on `short_log`/
+`long_log` alone, verified below.)
 
 `long_log`'s ratio swings widely by size (4.2x to 41.5x) — real
 seed-to-seed variance on only 3 seeds per point, not a sign the
