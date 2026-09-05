@@ -298,7 +298,12 @@ figure. Its failure mode isn't cost — it's dropping candidates it can't
 find a small witness for, which shows up as an artificially LOW CX count
 next to an incomplete, non-functional mixer, and it doesn't scale to
 `n_nodes=150` long-range at all: brute-force enumeration is intractable
-there, which is exactly why this ladder measures technique 2 instead.)*
+there, which is exactly why this ladder measures technique 2 instead.
+Checked directly, not just argued — `docs/scaling-ladder-and-decomposition.md`'s
+"Why isn't the exact construction on this ladder too?" measures it on
+these same graphs at the two sizes where it's tractable, and finds
+exactly this: 75 CX and fully disconnected, 43% of candidates dropped,
+at `long_log, n_nodes=30`.)*
 
 The same three stages, measured for safety instead of cost:
 
@@ -458,7 +463,10 @@ QAOA performance.
     `run_cost_aware_scaling_ladder.py`, `run_cost_aware_scaling_ladder_aggressive.py`,
     `run_fixed_alpha_ladder.py`, `run_decomposed_cost_aware_ladder.py`,
     `run_best_of_both_ladder.py`, `run_hierarchical_decomposed_ladder.py`,
-    `run_cost_capped_decomposition.py`, `run_real_networks_hierarchical.py`.
+    `run_cost_capped_decomposition.py`, `run_real_networks_hierarchical.py`,
+    `exact_construction_ladder_check.py` (measures technique 1 directly on
+    the ladder's own graphs, confirming why it's excluded from the
+    progression figures below — misleads on cost and safety at once).
   - **Figures**: `plot_illustrations.py` (explanatory diagrams, not
     measurements), `plot_results_figures.py` (this README's five result
     figures, from already-committed CSVs, no re-measurement).

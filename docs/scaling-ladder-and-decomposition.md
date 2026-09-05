@@ -139,6 +139,60 @@ size (`n_nodes=10`, coefficient of variation 50-65%+) and drops to a
 much tighter band by `n_nodes≥60` — "small variance" is real, but only
 past a floor size.
 
+### Why isn't the exact construction (technique 1) on this ladder too?
+
+A fair question about section 2's own figures (and the README's
+`construction_progression_plot.png` / `synthetic_mass_progression_plot.png`,
+which reuse this same data): they compare the cost-aware bounded-witness
+mixer against its own decomposed and cost-capped variants, but never
+against the exact construction directly. Checked directly, not assumed:
+`scripts/exact_construction_ladder_check.py` builds the EXACT
+construction (`build_matroid_mixer`, brute-force witness search, no cost
+awareness) on these same `CONDITIONS` graphs, at the two sizes where
+brute-force spanning-tree enumeration stays tractable (`n_nodes=10` and
+`30` — `60` already exceeds a 30-second budget on this hardware for
+BOTH conditions, timed directly before writing the script).
+
+| condition | n_nodes | mean CX | dropped candidates (mean, of 66/561) | fully connected? |
+|---|---|---|---|---|
+| short_log | 10 | 264 | 0 | yes, all 3 seeds |
+| short_log | 30 | 668 | 0 | yes, all 3 seeds |
+| long_log | 10 | 7,355 | 11 (0, 30, 2 across the 3 seeds) | 2 of 3 seeds |
+| long_log | 30 | **75** | **239 (37-50% of candidates)** | **no, all 3 seeds** |
+
+At `long_log, n_nodes=30` the exact construction drops 206-278 of 561
+candidate exchanges (37-50%) and is fully disconnected in every seed —
+yet reports a mean of just 75 CX, far BELOW the cost-aware whole-graph
+construction's own number at the identical size (17,225 CX, section 2's
+table above). Adding this line to `construction_progression_plot.png`
+would show exact construction crashing to the CHEAPEST point on the
+entire chart, on the hardest condition, exactly where it's most broken —
+backwards from what the figure is trying to communicate, and for a
+mechanical reason: a dropped candidate costs nothing, it isn't dropped
+*because* it's cheap.
+
+It's worse on the safety axis. `mean_feasible_mass` is exactly 1.0 on
+every single row above, including the catastrophically incomplete
+`long_log, n=30` ones — because leakage is only measured among terms
+that exist; a dropped candidate isn't leaky, it's simply absent from the
+circuit entirely. Added to `synthetic_mass_progression_plot.png`, exact
+construction would sit indistinguishable from perfect, right on top of
+the cost-capped refinement's own line, at the exact point where it's
+least trustworthy.
+
+![Exact construction's CX count on the ladder's own graphs -- crashes when candidates get dropped, not when it gets cheap](../results/exact_construction_ladder_check_cx_plot.png)
+
+![The same data on the safety axis -- looks perfect even where 37-50% of candidates were dropped](../results/exact_construction_ladder_check_mass_plot.png)
+
+Technique 1 is correctly excluded from both of this document's own
+progression figures, and from the README's — not because its failure
+mode was assumed, but because measuring it directly on the ladder's own
+graphs shows it would mislead on cost and safety simultaneously, in
+opposite-looking ways, at the exact sizes where a reader would be most
+likely to compare it against the other three techniques.
+
+Reproduce: `python scripts/exact_construction_ladder_check.py`.
+
 ## 3. Is any of this executable on current hardware?
 
 Rough estimate using published two-qubit gate fidelities (general
