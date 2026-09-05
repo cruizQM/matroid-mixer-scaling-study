@@ -381,105 +381,43 @@ QAOA performance.
 - `methodology.md` — graph generation, move generation, and exactly what
   "gate count" and "depth" mean.
 - `docs/mixer-construction.md` — technical reference: matroid theory,
-  move generation, exact circuit-level derivation, witness conditioning
-  and its logic-minimization, correctness-verification arguments.
-- `docs/circuit-validity.md` — the full narrative: the correctness bug,
-  the real-topology failure and its root cause, the decomposition fix and
-  its scaling validation, and the circuit-cost investigation.
-- `docs/bounded-witness-mixer.md` — a second, density-driven witness-blowup
-  axis, the bounded-witness mixer as an alternative to decomposition
-  (construction, a correctness bug the cross-check caught in shared code,
-  real-scale safety survey), and the circuit-cost investigation that
-  found the first version of that construction cost up to 38x more than
-  necessary, plus the cost-aware search fix that mostly closed the gap.
-- `docs/scaling-ladder-and-decomposition.md` — does the flat-tie-count
-  assumption hold under a more realistic growth model (no); an
-  escalating realism ladder for the bounded-witness mixer and a NISQ
-  hardware feasibility check; a real bug (silent term collapse) found
-  while pushing cost down further; a dead end (per-term adaptive cost
-  pressure) that looked like a fix and wasn't, caught by re-validation;
-  the fix that actually works (decomposition + the bounded-witness
-  mixer, dominating almost everywhere it applies) -- including a SECOND
-  instance of the same adaptive-search bug found inside the
-  decomposition script itself; density-aware hierarchical decomposition,
-  pushing the hardest remaining conditions further toward NISQ
-  feasibility; a real-topology check validating log-growth/long-range
-  tie modeling against real (and real-benchmark) feeder data; direct
-  validation of the actual construction on two real networks;
-  cost-capped decomposition (measures each
-  subproblem's actual cost and recursively re-splits anything over a
-  threshold, guaranteeing every synthetic-ladder seed stays under 500
-  CX, and coming within 1.6% of that target on real data); and two
-  methodology mistakes this investigation made and caught (comparing
-  results across a code fix without re-running both sides, twice).
-- `scripts/` — synthetic sweep: `graphs.py`, `mixer.py`, `measure.py`,
-  `run_scaling_study.py`, `plot.py`, `verify_correctness.py`. Real
-  topology: `real_feeders.py`, `run_real_feeder_validation.py`,
-  `investigate_fundamental_cycles.py` (root-cause diagnostic).
-  Decomposition fix: `zone_decomposition.py`,
-  `run_zone_decomposition_validation.py`,
-  `run_decomposition_scaling_study.py` (does it hold as size grows?);
-  `plot_decomposition_by_qubits.py` re-plots that sweep's results by
-  qubit count instead of node count, for direct comparison against the
-  synthetic scaling sweep (`run_scaling_study.py`, `scaling_plot.png` --
-  `docs/circuit-validity.md`'s "headline result 1") (reads the existing
-  CSV, no re-measurement).
-  `plot_illustrations.py` generates the explanatory diagrams (not
-  measurements) -- including `plot_bounded_witness_concept()` and
-  `plot_cost_capped_decomposition_concept()`, added alongside this
-  README's restructuring to illustrate techniques 2 and 3 directly, since
-  neither previously had a diagram of its own. Bounded-witness mixer: `random_trees.py` (Wilson's
-  algorithm + exchange-graph-walk sampling), `truncated_mixer.py`
-  (bounded-witness construction, including the cost-aware search --
-  `cost_alpha` -- described below), `leakage_trace.py` (exact + sparse
-  danger-mass tracing), `verify_leakage_trace.py` (correctness check for
-  all three), `tie_density_sweep.py` (the density-driven witness-blowup
-  axis), `run_bounded_witness_safety_survey.py` (real-scale safety +
-  circuit-cost survey). Circuit-cost investigation:
-  `measure_truncated_mixer.py` (own cost trend + head-to-head vs. the
-  exact construction on the density family), `truncated_witness_cap_sweep.py`
-  / `truncated_witness_cap_sweep_longrange.py` (witness-cap vs. cost/safety,
-  density family and long-range family + real scale), and
-  `truncated_mixer_search_refinement.py` (cap=0/1 instability check, and
-  the `cost_alpha` sweep that set the construction's current default).
-  Escalating realism ladder + decomposition:
-  `run_scaling_study_log_ties.py` (the flat-tie-count assumption,
-  stress-tested), `run_cost_aware_scaling_ladder.py` (the four-condition
-  ladder), `run_cost_aware_scaling_ladder_aggressive.py` (the never-fire
-  collapse, deliberately reproduced with `active_terms` tracked so it's
-  visible in the CSV), `run_cost_aware_scaling_ladder_alpha_sweep.py`
-  and `truncated_mixer_search_refinement.py`'s adaptive-search addition
-  in `truncated_mixer.py` (the adaptive-alpha dead end),
-  `run_fixed_alpha_ladder.py` (the fixed-`cost_alpha` baseline,
-  re-measured after the never-fire fix so the final comparison is valid),
-  `run_decomposed_cost_aware_ladder.py` (the fix that works), and
-  `run_best_of_both_ladder.py` (confirms decomposition never loses once
-  it can be applied at all). `run_hierarchical_decomposed_ladder.py`
-  (density-aware recursive decomposition for the still-hard conditions,
-  three iterations each empirically validated),
-  `run_real_networks_hierarchical.py` (this branch's actual construction
-  run directly on `real_feeders.load_cigre_mv` -- new -- and the
-  existing `load_ieee33`), and `run_cost_capped_decomposition.py` (measures
-  each subproblem's actual CX cost and recursively re-splits anything over
-  a threshold, rather than picking a zone size and hoping -- 100% success
-  on the synthetic ladder, tested on both real networks too) round it out.
-  `plot_results_figures.py` generates this README's four result figures
-  -- one cost-progression plot and one NISQ-feasibility plot per side of
-  the synthetic/real split (`construction_progression_plot.png`,
-  `synthetic_nisq_feasibility_plot.png`, `real_network_comparison_plot.png`,
-  `real_nisq_feasibility_plot.png`) -- directly from already-committed
-  CSVs -- no re-measurement, same discipline as `plot_decomposition_by_qubits.py`.
+  exact circuit derivation, correctness-verification arguments.
+- `docs/circuit-validity.md` — the real-topology failure, its root cause,
+  the decomposition fix, and its scaling validation.
+- `docs/bounded-witness-mixer.md` — the density-driven witness-blowup
+  axis, the bounded-witness mixer, and the circuit-cost investigation
+  behind `cost_alpha`.
+- `docs/scaling-ladder-and-decomposition.md` — the escalating realism
+  ladder, NISQ feasibility, hierarchical and cost-capped decomposition,
+  and direct validation on two real networks. The fullest, most detailed
+  account in this repo — everything summarized in this README's Results
+  section traces back to a section here.
+- `scripts/` — each script's own docstring explains what it measures and
+  why; the `docs/*.md` file above covering that topic has the full
+  narrative. Grouped by what they validate:
+  - **Exact construction**: `graphs.py`, `mixer.py`, `measure.py`,
+    `run_scaling_study.py`, `plot.py`, `verify_correctness.py`.
+  - **Real topology & decomposition**: `real_feeders.py`,
+    `run_real_feeder_validation.py`, `investigate_fundamental_cycles.py`,
+    `zone_decomposition.py`, `run_zone_decomposition_validation.py`,
+    `run_decomposition_scaling_study.py`.
+  - **Bounded-witness mixer**: `random_trees.py`, `truncated_mixer.py`,
+    `leakage_trace.py`, `verify_leakage_trace.py`, `tie_density_sweep.py`,
+    `run_bounded_witness_safety_survey.py`, `measure_truncated_mixer.py`,
+    `truncated_witness_cap_sweep.py`, `truncated_witness_cap_sweep_longrange.py`,
+    `truncated_mixer_search_refinement.py`.
+  - **Escalating ladder & decomposition**: `run_scaling_study_log_ties.py`,
+    `run_cost_aware_scaling_ladder.py`, `run_cost_aware_scaling_ladder_aggressive.py`,
+    `run_fixed_alpha_ladder.py`, `run_decomposed_cost_aware_ladder.py`,
+    `run_best_of_both_ladder.py`, `run_hierarchical_decomposed_ladder.py`,
+    `run_cost_capped_decomposition.py`, `run_real_networks_hierarchical.py`.
+  - **Figures**: `plot_illustrations.py` (explanatory diagrams, not
+    measurements), `plot_results_figures.py` (this README's four result
+    figures, from already-committed CSVs, no re-measurement).
 - `results/` — one CSV/plot pair per script above, all generated, none
-  hand-edited; `*_before_minimization.*` files are the pre-fix numbers,
-  kept for the before/after comparison in `docs/circuit-validity.md`;
-  `illustration_*.png` are the explanatory diagrams
-  (`illustration_feeder_problem.png`, `illustration_basis_exchange_move.png`,
-  and `illustration_fundamental_cycle.png` share the exact same 14-node
-  running example graph; `illustration_decomposition.png` uses a larger
-  instance from the same random seed, needed for partitioning to be
-  illustrative at all; `illustration_bounded_witness.png` and
-  `illustration_cost_capped_decomposition.png` are concept diagrams for
-  techniques 2 and 3, not derived from any specific measured instance).
+  hand-edited. `*_before_minimization.*` files are pre-fix numbers, kept
+  for the before/after comparison in `docs/circuit-validity.md`.
+  `illustration_*.png` are explanatory diagrams, not measurements.
 
 ## License
 
