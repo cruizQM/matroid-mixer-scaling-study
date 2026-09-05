@@ -58,7 +58,10 @@ def _series(rows: list[dict], key_col: str, key_val: str, x_col: str, y_col: str
 
 
 def plot_construction_progression() -> None:
-    whole = _rows("cost_aware_scaling_ladder_summary.csv")
+    # technique 2 = FIXED cost_alpha=0.01, this construction's validated
+    # default -- NOT cost_aware_scaling_ladder_summary.csv, which
+    # (per that script's own docstring) measures the ADAPTIVE variant.
+    whole = _rows("fixed_alpha_ladder_summary.csv")
     flat = _rows("decomposed_cost_aware_ladder_summary.csv")
     capped = _rows("cost_capped_decomposition_summary.csv")
 
@@ -98,7 +101,10 @@ def plot_synthetic_mass_progression() -> None:
     elsewhere). Exact construction also doesn't scale to n_nodes=150
     long-range at all -- brute-force enumeration is the reason this
     repo's exact-construction sweeps stay at small sizes everywhere else."""
-    whole = _rows("cost_aware_scaling_ladder_summary.csv")
+    # technique 2 = FIXED cost_alpha=0.01, this construction's validated
+    # default -- NOT cost_aware_scaling_ladder_summary.csv, which
+    # (per that script's own docstring) measures the ADAPTIVE variant.
+    whole = _rows("fixed_alpha_ladder_summary.csv")
     flat = _rows("decomposed_cost_aware_ladder_summary.csv")
     capped = _rows("cost_capped_decomposition_summary.csv")
 
@@ -144,7 +150,10 @@ def plot_synthetic_nisq_feasibility() -> None:
     misleadingly imply that curve's fidelity even where the other curve's
     value is what matters. Uses the ladder's hardest tested size
     (n_nodes=150) as the representative point for each condition."""
-    whole = _rows("cost_aware_scaling_ladder_summary.csv")
+    # technique 2 = FIXED cost_alpha=0.01, this construction's validated
+    # default -- NOT cost_aware_scaling_ladder_summary.csv, which
+    # (per that script's own docstring) measures the ADAPTIVE variant.
+    whole = _rows("fixed_alpha_ladder_summary.csv")
     capped = _rows("cost_capped_decomposition_summary.csv")
 
     def cx_at_150(rows: list[dict], condition: str) -> float:

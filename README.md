@@ -297,9 +297,9 @@ feasibility numbers above:
 
 | condition | construction | CX | reading |
 |---|---|---|---|
-| short-range, log growth | whole-graph | 2,361 | borderline on trapped-ion; not usable on superconducting |
+| short-range, log growth | whole-graph | 2,745 | borderline on trapped-ion; not usable on superconducting |
 | short-range, log growth | cost-capped | **73** | comfortably NISQ-ready |
-| long-range, log growth | whole-graph | 10,825 | not usable on either device |
+| long-range, log growth | whole-graph | 10,712 | not usable on either device |
 | long-range, log growth | cost-capped | **337** | comfortably NISQ-ready |
 
 ![Where the synthetic ladder lands relative to NISQ feasibility](results/synthetic_nisq_feasibility_plot.png)
