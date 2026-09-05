@@ -319,19 +319,27 @@ feasibility on the harder, long-range condition.
 | network | construction | CX | reading |
 |---|---|---|---|
 | CIGRE MV (15 buses, 3 ties) | exact whole-graph | 12,220 | fault-tolerant-ready; far outside NISQ range |
-| CIGRE MV | zone decomposition | 3,668 | cheaper, but still outside a comfortable NISQ regime |
-| CIGRE MV | cost-capped refinement | **64** | comfortably NISQ-ready, perfectly safe |
+| CIGRE MV | zone decomposition | 6,771 (3,668-9,178) | cheaper on average, but unreliable — and still outside a comfortable NISQ regime even at its best |
+| CIGRE MV | cost-capped refinement | **64** | comfortably NISQ-ready, perfectly safe, identical every seed |
 | IEEE33 (33 buses, 5 ties) | exact whole-graph | 96 | 573/597 candidates dropped, disconnected — not usable at any cost |
-| IEEE33 | zone decomposition | 132 | already comfortably NISQ-ready |
+| IEEE33 | zone decomposition | 132 | already comfortably NISQ-ready, identical every seed |
 | IEEE33 | cost-capped refinement | **132** | matches zone decomposition exactly — nothing left on the table |
 
 Same pattern as synthetic data: every stage of technique 3 costs no more
-than the one before it, on both networks, no exceptions. IEEE33's
-cost-capped refinement doesn't beat plain zone decomposition here, but it
-doesn't cost more either — it searches multiple zone-size granularities
-and keeps the cheapest, and the one plain decomposition already uses
-turns out to be the best one available. Both real networks land
-comfortably in NISQ range this way.
+than the one before it, on both networks, no exceptions — but CIGRE MV's
+zone-decomposition step is a genuinely unreliable number, not just a
+point estimate: it ranges 3,668-9,178 CX across 5 tested seeds, over 2x
+spread, even though its zones use fully deterministic exact tree
+enumeration (the randomness lives in the witness search's restart order,
+not the tree set). Cost-capped's refinement is immune to this on both
+networks — identical across every seed tested — which is itself a
+reason to prefer it over plain decomposition beyond just the mean cost:
+it's not just cheaper, it's predictable. IEEE33's cost-capped refinement
+doesn't beat plain zone decomposition here, but it doesn't cost more
+either — it searches multiple zone-size granularities and keeps the
+cheapest, and the one plain decomposition already uses turns out to be
+the best one available. Both real networks land comfortably in NISQ
+range this way.
 
 ![Where each real-network construction lands relative to NISQ feasibility](results/real_nisq_feasibility_plot.png)
 

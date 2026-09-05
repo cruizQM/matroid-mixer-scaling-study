@@ -29,18 +29,43 @@ transmission dataset (real_feeders.py's own docstring).
 ## Method
 
 For each real network: the EXACT construction (`build_matroid_mixer`,
-full enumeration -- both networks are small enough), AND the
-hierarchical, density-aware decomposition +
-cost-aware bounded-witness mixer (this branch's current-best
-construction). Both measured with the same transpilation/safety
-methodology as the rest of this investigation.
+full enumeration -- both networks are small enough, and fully
+deterministic -- no seed dependence, so measured once), AND the
+hierarchical, density-aware decomposition + cost-aware bounded-witness
+mixer (this branch's current-best construction). Both measured with the
+same transpilation/safety methodology as the rest of this investigation.
 
-Writes results/real_networks_hierarchical_results.csv.
+## Why `decomposed` and `cost_capped` are averaged over multiple seeds
+(and `exact` isn't)
+
+An earlier version of this script measured `decomposed` and
+`cost_capped` at `seed=0` only, matching neither this repo's own
+synthetic-ladder convention (always >=3 seeds) nor, it turned out, real
+seed-independence. Checked directly: even though CIGRE MV's zones are
+small enough for fully deterministic exact spanning-tree enumeration,
+`build_truncated_witness_mixer`'s witness search for approximate terms
+still uses randomized restarts internally, and different seeds converge
+to different-quality witnesses for the same term -- CIGRE MV's flat
+`decomposed` result ranged from 3,668 to 9,178 CX across 5 tested seeds,
+a 2.5x spread, with `seed=0` (the only one previously measured) landing
+on the cheapest end by chance, not because it's representative.
+`cost_capped` turned out to be robust on both networks regardless (its
+`cost_alpha`-sweep already searches for the cheapest option, which
+apparently collapses the space of viable witnesses enough that restart
+order stops mattering) -- but that robustness was never verified either,
+just assumed from a single seed. Now both are measured across
+`SEEDS_PER_NETWORK` seeds and reported as mean +/- range, exactly like
+the synthetic ladder always has been.
+
+Writes results/real_networks_hierarchical_results.csv (per seed) and
+results/real_networks_hierarchical_summary.csv (mean/std/min/max per
+network + method).
 """
 
 from __future__ import annotations
 
 import csv
+import statistics
 import sys
 from pathlib import Path
 
@@ -61,9 +86,11 @@ from zone_decomposition import build_assembly_graph, build_zone_subgraph, partit
 
 RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 CSV_PATH = RESULTS_DIR / "real_networks_hierarchical_results.csv"
+SUMMARY_CSV_PATH = RESULTS_DIR / "real_networks_hierarchical_summary.csv"
 BETA = 0.37
 N_STARTING_TREES = 200
 UNSAFE_TOL = 1e-6
+SEEDS_PER_NETWORK = 5
 
 
 def measure_exact(graph) -> dict:
@@ -76,6 +103,7 @@ def measure_exact(graph) -> dict:
 
     return {
         "method": "exact_whole_graph",
+        "seed": None,
         "n_terms": len(construction.terms),
         "max_witness_size": max((t.control_count for t in construction.terms), default=0),
         "dropped_candidates": construction.dropped_candidates,
@@ -126,6 +154,7 @@ def measure_decomposed(graph, seed: int = 0) -> dict:
     unsafe = sum(1 for m in all_masses if m < 1.0 - UNSAFE_TOL)
     return {
         "method": "decomposed",
+        "seed": seed,
         "n_terms": total_terms,
         "max_witness_size": None,
         "dropped_candidates": 0,
@@ -149,6 +178,7 @@ def measure_cost_capped(graph, seed: int = 0) -> dict:
     unsafe = sum(1 for m in result["masses"] if m < 1.0 - 1e-6)
     return {
         "method": "cost_capped",
+        "seed": seed,
         "n_terms": None,
         "max_witness_size": None,
         "dropped_candidates": 0,
@@ -184,19 +214,51 @@ def run(name: str, graph, run_exact: bool = True) -> list:
         # new information. That existing measurement: 24 terms, 573 of 597
         # candidates dropped, fully_connected=False, cx_count=96 (cheap only
         # because it's mostly incomplete, not because it's a good mixer).
+        # Fully deterministic (exact enumeration, no randomized search) --
+        # no seed dependence to average over.
         print("  exact: SKIPPED -- already measured in results/real_feeder_results.csv "
               "(24 terms, 573/597 candidates dropped, fully_connected=False)", flush=True)
 
-    decomp = measure_decomposed(graph)
-    decomp["network"] = name
-    rows.append(decomp)
-    print(f"  decomposed: {decomp}", flush=True)
+    for seed in range(SEEDS_PER_NETWORK):
+        decomp = measure_decomposed(graph, seed=seed)
+        decomp["network"] = name
+        rows.append(decomp)
+        print(f"  decomposed seed={seed}: {decomp}", flush=True)
 
-    capped = measure_cost_capped(graph)
-    capped["network"] = name
-    rows.append(capped)
-    print(f"  cost_capped: {capped}", flush=True)
+    for seed in range(SEEDS_PER_NETWORK):
+        capped = measure_cost_capped(graph, seed=seed)
+        capped["network"] = name
+        rows.append(capped)
+        print(f"  cost_capped seed={seed}: {capped}", flush=True)
+
     return rows
+
+
+def summarize(rows: list) -> list:
+    """One row per (network, method): mean/std/min/max CX and mean
+    feasible mass across SEEDS_PER_NETWORK seeds -- exact_whole_graph is
+    deterministic (single measurement, no seed loop), reported as-is with
+    std=0."""
+    summary = []
+    seen = set()
+    for r in rows:
+        key = (r["network"], r["method"])
+        if key in seen:
+            continue
+        seen.add(key)
+        group = [x for x in rows if x["network"] == r["network"] and x["method"] == r["method"]]
+        cx_vals = [g["cx_count"] for g in group]
+        mass_vals = [g["mean_feasible_mass"] for g in group]
+        unsafe_vals = [g["unsafe_rate"] for g in group]
+        summary.append({
+            "network": r["network"], "method": r["method"], "n_seeds": len(group),
+            "cx_mean": round(statistics.mean(cx_vals), 1),
+            "cx_std": round(statistics.pstdev(cx_vals), 1) if len(cx_vals) > 1 else 0.0,
+            "cx_min": min(cx_vals), "cx_max": max(cx_vals),
+            "mean_feasible_mass_mean": round(statistics.mean(mass_vals), 4),
+            "unsafe_rate_mean": round(statistics.mean(unsafe_vals), 4),
+        })
+    return summary
 
 
 def main() -> None:
@@ -205,7 +267,7 @@ def main() -> None:
     rows.extend(run("CIGRE_MV", load_cigre_mv(), run_exact=True))
     rows.extend(run("IEEE33", load_ieee33(), run_exact=False))
 
-    fieldnames = ["network", "method", "n_terms", "max_witness_size", "dropped_candidates",
+    fieldnames = ["network", "method", "seed", "n_terms", "max_witness_size", "dropped_candidates",
                   "fully_connected", "leak_free_verified", "cx_count", "depth",
                   "n_zones", "assembly_n_nodes", "unsafe_rate", "mean_feasible_mass",
                   "n_leaves", "max_leaf_cx", "met_threshold"]
@@ -214,6 +276,16 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(rows)
     print(f"\nwrote {CSV_PATH}")
+
+    summary_rows = summarize(rows)
+    with open(SUMMARY_CSV_PATH, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(summary_rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(summary_rows)
+    print(f"wrote {SUMMARY_CSV_PATH}")
+    print("\nSummary:")
+    for row in summary_rows:
+        print(f"  {row}")
 
 
 if __name__ == "__main__":

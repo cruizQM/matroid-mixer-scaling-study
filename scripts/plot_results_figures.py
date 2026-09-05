@@ -180,20 +180,27 @@ def plot_synthetic_nisq_feasibility() -> None:
 
 
 def plot_real_nisq_feasibility() -> None:
-    real = _rows("real_networks_hierarchical_results.csv")
+    """Uses real_networks_hierarchical_summary.csv (mean over
+    SEEDS_PER_NETWORK seeds for decomposed/cost_capped -- see that
+    script's own docstring for why averaging matters here: CIGRE MV's
+    flat-decomposed result varies 3,668-9,178 CX depending on seed, even
+    though its zones use fully deterministic exact tree enumeration
+    (the randomness is in the witness search's restart order, not the
+    tree set)."""
+    real = _rows("real_networks_hierarchical_summary.csv")
 
     def cx_of(network: str, method: str) -> float | None:
         for r in real:
             if r["network"] == network and r["method"] == method:
-                return float(r["cx_count"])
+                return float(r["cx_mean"])
         return None
 
     fig, ax = plt.subplots(figsize=(9, 5.5))
-    _fidelity_axes(ax, "Where each real-network construction lands relative to NISQ feasibility\n(read a network's fidelity off either curve at its vertical line)")
+    _fidelity_axes(ax, "Where each real-network construction lands relative to NISQ feasibility\n(read a network's fidelity off either curve at its vertical line; mean over 5 seeds)")
 
     lines = [
         ("CIGRE MV exact", cx_of("CIGRE_MV", "exact_whole_graph"), "#888888", "dotted"),
-        ("CIGRE MV decomposed", cx_of("CIGRE_MV", "decomposed"), "#D9822B", "dashdot"),
+        ("CIGRE MV decomposed (mean)", cx_of("CIGRE_MV", "decomposed"), "#D9822B", "dashdot"),
         ("CIGRE MV cost-capped", cx_of("CIGRE_MV", "cost_capped"), "#2E8B57", "solid"),
         ("IEEE33 exact (disconnected)", 96, "#B0392B", "dotted"),
         ("IEEE33 decomposed", cx_of("IEEE33", "decomposed"), "#F0B27A", "dashdot"),
@@ -202,7 +209,7 @@ def plot_real_nisq_feasibility() -> None:
     for label, xval, color, ls in lines:
         if xval is None:
             continue
-        ax.axvline(xval, color=color, ls=ls, lw=1.6, alpha=0.85, label=f"{label} ({int(xval)} CX)", zorder=2)
+        ax.axvline(xval, color=color, ls=ls, lw=1.6, alpha=0.85, label=f"{label} ({int(round(xval))} CX)", zorder=2)
 
     ax.legend(fontsize=8, loc="lower left", ncol=1)
     fig.tight_layout()
@@ -213,32 +220,43 @@ def plot_real_nisq_feasibility() -> None:
 
 
 def plot_real_network_comparison() -> None:
-    real = _rows("real_networks_hierarchical_results.csv")
+    """Error bars (min-max across SEEDS_PER_NETWORK seeds) on decomposed
+    and cost_capped -- exact is a single deterministic measurement, no
+    bar needed there. CIGRE MV's decomposed bar is the one that actually
+    needs it: 3,668-9,178 CX depending on seed, not a point estimate."""
+    real = _rows("real_networks_hierarchical_summary.csv")
 
-    def cx_of(network: str, method: str) -> float | None:
+    def stats_of(network: str, method: str) -> tuple[float, float, float] | None:
         for r in real:
             if r["network"] == network and r["method"] == method:
-                return float(r["cx_count"])
+                return float(r["cx_mean"]), float(r["cx_min"]), float(r["cx_max"])
         return None
 
     networks = ["CIGRE_MV", "IEEE33"]
-    methods = [("exact_whole_graph", "exact whole-graph", "#4472C4"), ("decomposed", "zone decomposition", "#D9822B"), ("cost_capped", "cost-capped refinement", "#2E8B57")]
-    exact_vals = {"CIGRE_MV": cx_of("CIGRE_MV", "exact_whole_graph"), "IEEE33": 96}
+    methods = [("exact_whole_graph", "exact whole-graph", "#4472C4"), ("decomposed", "zone decomposition (mean, range)", "#D9822B"), ("cost_capped", "cost-capped refinement", "#2E8B57")]
+    exact_vals = {"CIGRE_MV": stats_of("CIGRE_MV", "exact_whole_graph")[0], "IEEE33": 96}
 
     fig, ax = plt.subplots(figsize=(8, 5))
     x = np.arange(len(networks))
     width = 0.25
     for i, (method, label, color) in enumerate(methods):
-        vals = []
+        vals, err_lo, err_hi = [], [], []
         for net in networks:
-            v = exact_vals[net] if method == "exact_whole_graph" else cx_of(net, method)
-            vals.append(v if v is not None else 0)
-        bars = ax.bar(x + (i - 1) * width, vals, width, label=label, color=color)
+            if method == "exact_whole_graph":
+                v, lo, hi = exact_vals[net], 0.0, 0.0
+            else:
+                v, mn, mx = stats_of(net, method)
+                lo, hi = v - mn, mx - v
+            vals.append(v)
+            err_lo.append(lo)
+            err_hi.append(hi)
+        bars = ax.bar(x + (i - 1) * width, vals, width, label=label, color=color,
+                       yerr=[err_lo, err_hi], capsize=4, ecolor="black")
         for b, v, net in zip(bars, vals, networks):
             note = ""
             if method == "exact_whole_graph" and net == "IEEE33":
                 note = "\n(disconnected)"
-            ax.text(b.get_x() + b.get_width() / 2, v, f"{int(v)}{note}", ha="center", va="bottom", fontsize=8)
+            ax.text(b.get_x() + b.get_width() / 2, v, f"{int(round(v))}{note}", ha="center", va="bottom", fontsize=8)
 
     ax.axhline(CX_THRESHOLD, color="black", ls="dashed", lw=1, label=f"{CX_THRESHOLD} CX target")
     ax.set_yscale("log")

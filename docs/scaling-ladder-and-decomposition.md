@@ -606,9 +606,9 @@ repo already made for the CATS transmission dataset
 | network | construction | n_terms | CX | depth | result |
 |---|---|---|---|---|---|
 | CIGRE MV (15 buses, 3 ties) | exact whole-graph | 16 | 12,220 | 24,245 | connected, exactly leak-free, 37 candidates dropped |
-| CIGRE MV | decomposed (2 zones) | 10 | **3,668** | 7,101 | 3.3x cheaper; unsafe_rate 3.0%, mean feasible mass 0.9995 |
+| CIGRE MV | decomposed (2 zones) | 10 (seed 0) | **6,771 (3,668-9,178, mean over 5 seeds)** | 7,101 (seed 0) | 1.8x cheaper on average; unsafe_rate 19.4% mean, mean feasible mass 0.9949 mean |
 | IEEE33 (33 buses, 5 ties) | exact whole-graph *(already measured, `results/real_feeder_results.csv`)* | 24 | 96 | 78 | **573 of 597 candidates dropped, disconnected** |
-| IEEE33 | decomposed (4 zones) | 6 | **132** | 272 | fully functional; unsafe_rate 0%, mean feasible mass 1.0 |
+| IEEE33 | decomposed (4 zones) | 6 | **132** | 272 | fully functional, identical across all 5 seeds tested; unsafe_rate 0%, mean feasible mass 1.0 |
 
 On IEEE33, decomposition isn't just cheaper than the exact whole-graph
 construction -- the exact construction doesn't work at all there
@@ -616,6 +616,19 @@ construction -- the exact construction doesn't work at all there
 instead). This reproduces that same distinction with this branch's
 cost-aware construction rather than the exact one, on genuine published
 topology, not a synthetic stand-in.
+
+**CIGRE MV's decomposed number is genuinely unreliable, not just a point
+estimate** -- checked directly across 5 seeds, not assumed from the
+single `seed=0` measurement this table originally reported (3,668 CX,
+the cheapest of the five). Even though CIGRE MV's zones are small enough
+for fully deterministic exact spanning-tree enumeration,
+`build_truncated_witness_mixer`'s witness search for approximate terms
+still uses randomized restarts internally, and different seeds converge
+to different-quality witnesses for the same term -- a 2.5x spread with
+no obvious floor. IEEE33 shows no such sensitivity (identical 132 CX
+across all 5 seeds tested), so this isn't a general property of real
+networks, just of this specific one at `cost_alpha=0.01`. Section 11's
+cost-capped refinement, notably, is immune to this on BOTH networks.
 
 Reproduce: `python scripts/run_real_networks_hierarchical.py`.
 

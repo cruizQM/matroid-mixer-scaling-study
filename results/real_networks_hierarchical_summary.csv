@@ -1,0 +1,6 @@
+network,method,n_seeds,cx_mean,cx_std,cx_min,cx_max,mean_feasible_mass_mean,unsafe_rate_mean
+CIGRE_MV,exact_whole_graph,1,12220,0.0,12220,12220,1.0,0.0
+CIGRE_MV,decomposed,5,6770.8,1909.5,3668,9178,0.9949,0.1939
+CIGRE_MV,cost_capped,5,64,0.0,64,64,1.0,0.0
+IEEE33,decomposed,5,132,0.0,132,132,1.0,0.0
+IEEE33,cost_capped,5,132,0.0,132,132,1.0,0.0
