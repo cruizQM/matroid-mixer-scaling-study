@@ -1,17 +1,21 @@
 """Generates README-facing result figures from already-committed CSVs --
 no new measurement, just visualizing numbers that were previously only
-presented as markdown tables. Four figures, two per side of the
-synthetic/real split the README's Results section is built around:
+presented as markdown tables. Five figures:
 
 1. `construction_progression_plot.png` -- synthetic ladder, CX vs. size,
-   whole-graph (technique 2) -> zone decomposition -> its cost-capped
-   refinement (technique 3, both stages), against the 500-CX target line.
-2. `synthetic_nisq_feasibility_plot.png` -- the same ladder's whole-graph
+   whole-graph (technique 2) -> zone decomposition (technique 3a) -> its
+   cost-capped refinement (technique 3b), against the 500-CX target line.
+2. `synthetic_mass_progression_plot.png` -- the same three techniques,
+   same ladder, mean feasible mass (safety) instead of CX. Technique 1
+   deliberately excluded from this and the plot above -- see the
+   function's own docstring for why a leakage-axis comparison would
+   misrepresent it just as badly as a cost-axis one would.
+3. `synthetic_nisq_feasibility_plot.png` -- the same ladder's whole-graph
    vs. cost-capped numbers at its hardest tested size (n_nodes=150),
    against published NISQ fidelity curves.
-3. `real_network_comparison_plot.png` -- grouped bar chart, CX cost per
+4. `real_network_comparison_plot.png` -- grouped bar chart, CX cost per
    construction, both real networks, against the 500-CX target line.
-4. `real_nisq_feasibility_plot.png` -- the two real networks' three
+5. `real_nisq_feasibility_plot.png` -- the two real networks' three
    construction variants, against the same fidelity curves.
 
 (Two earlier figures were removed as redundant once the README's own
@@ -64,8 +68,8 @@ def plot_construction_progression() -> None:
         xs_f, ys_f = _series(flat, "condition", cond, "n_nodes", "cx_mean")
         xs_c, ys_c = _series(capped, "condition", cond, "n_nodes", "cx_mean")
         ax.plot(xs_w, ys_w, marker="o", color="#C0392B", label="whole-graph, no decomposition (technique 2)")
-        ax.plot(xs_f, ys_f, marker="s", color="#D9822B", label="+ zone decomposition (technique 3)")
-        ax.plot(xs_c, ys_c, marker="^", color="#2E8B57", label="+ cost-capped refinement (technique 3)")
+        ax.plot(xs_f, ys_f, marker="s", color="#D9822B", label="+ zone decomposition (technique 3a)")
+        ax.plot(xs_c, ys_c, marker="^", color="#2E8B57", label="+ cost-capped refinement (technique 3b)")
         ax.axhline(CX_THRESHOLD, color="black", ls="dashed", lw=1, label=f"{CX_THRESHOLD} CX target")
         ax.set_yscale("log")
         ax.set_xlabel("n_nodes")
@@ -77,6 +81,46 @@ def plot_construction_progression() -> None:
     fig.suptitle("Synthetic ladder: each stage attacks a different part of the cost", fontsize=12)
     fig.tight_layout(rect=(0, 0.1, 1, 0.95))
     out = RESULTS_DIR / "construction_progression_plot.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"wrote {out}")
+
+
+def plot_synthetic_mass_progression() -> None:
+    """Companion to plot_construction_progression -- same three
+    techniques, same ladder, but feasible mass (safety) instead of CX
+    (cost). Technique 1 (exact) is deliberately absent from both: its
+    failure mode is dropped candidates / disconnection, not leakage --
+    `measure_exact` reports mean_feasible_mass=1.0 by construction
+    whenever it runs at all, so a leakage-axis plot would show it as a
+    flat, misleadingly perfect line that hides its actual failure mode
+    (already told honestly via `dropped_candidates`/`fully_connected`
+    elsewhere). Exact construction also doesn't scale to n_nodes=150
+    long-range at all -- brute-force enumeration is the reason this
+    repo's exact-construction sweeps stay at small sizes everywhere else."""
+    whole = _rows("cost_aware_scaling_ladder_summary.csv")
+    flat = _rows("decomposed_cost_aware_ladder_summary.csv")
+    capped = _rows("cost_capped_decomposition_summary.csv")
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), sharey=True)
+    for ax, cond, title in ((axes[0], "short_log", "short-range ties, log growth"), (axes[1], "long_log", "long-range ties, log growth")):
+        xs_w, ys_w = _series(whole, "condition", cond, "n_nodes", "mean_feasible_mass_mean")
+        xs_f, ys_f = _series(flat, "condition", cond, "n_nodes", "mean_feasible_mass_mean")
+        xs_c, ys_c = _series(capped, "condition", cond, "n_nodes", "mean_feasible_mass_mean")
+        ax.plot(xs_w, ys_w, marker="o", color="#C0392B", label="whole-graph, no decomposition (technique 2)")
+        ax.plot(xs_f, ys_f, marker="s", color="#D9822B", label="+ zone decomposition (technique 3a)")
+        ax.plot(xs_c, ys_c, marker="^", color="#2E8B57", label="+ cost-capped refinement (technique 3b)")
+        ax.axhline(1.0, color="black", ls="dashed", lw=1, label="perfect (no leakage)")
+        ax.set_xlabel("n_nodes")
+        ax.set_title(title, fontsize=11)
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(0.85, 1.02)
+    axes[0].set_ylabel("mean feasible mass (1.0 = no leakage)")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=2, fontsize=9, bbox_to_anchor=(0.5, -0.1))
+    fig.suptitle("Synthetic ladder: the same three stages, measured for safety instead of cost", fontsize=12)
+    fig.tight_layout(rect=(0, 0.13, 1, 0.95))
+    out = RESULTS_DIR / "synthetic_mass_progression_plot.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"wrote {out}")
@@ -204,6 +248,7 @@ def plot_real_network_comparison() -> None:
 
 if __name__ == "__main__":
     plot_construction_progression()
+    plot_synthetic_mass_progression()
     plot_synthetic_nisq_feasibility()
     plot_real_nisq_feasibility()
     plot_real_network_comparison()

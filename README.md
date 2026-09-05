@@ -112,6 +112,27 @@ for redundancy — closer to the right panel than the left — which is
 exactly what makes this problem harder on real topology than it looks on
 a graph where ties happen to be short-range.
 
+**Two more terms used throughout the rest of this document: leakage and
+feasible mass.** A term whose witness is the *full* fundamental cycle
+fires only on states where its move is genuinely valid — it can never
+leave the feasible set. A term whose witness is deliberately capped
+smaller than that (technique 2, below) is only *approximately* correct:
+on some states it fires when it shouldn't, or the reverse. Each such
+mismatch risks **leakage** — probability that ends up on an infeasible
+(non-spanning-tree) state after enough exchanges have applied. **Feasible
+mass** is the complement, measured per trajectory: start from one
+feasible configuration, apply the mixer, and add up how much probability
+is still on feasible states afterward — 1.0 means that trajectory leaked
+nothing; less than 1.0 means some did. Averaged over many random
+starting configurations, this is the **mean feasible mass** reported
+throughout this document (and **unsafe rate**, the fraction of those
+starting points where *any* leakage occurred at all). Both are measured
+empirically (`leakage_trace.py` — exact for small instances, sampled via
+Wilson's algorithm at scale), not assumed from a term's abstract
+witness-search leakage rate alone: a term that looks leaky in isolation
+can cost little real mass if the states it misclassifies are rarely
+reached in practice, or the reverse.
+
 **This is the actual question this repo measures**: how much does that
 conditioning cost, in gates and circuit depth, and does that cost grow or
 stay manageable as the network gets larger and as tie placement gets more
@@ -187,9 +208,8 @@ measured at 17,386–32,520 CX gates at just 15-17 qubits, more than a real
 the search objective directly, closing most of that gap, and is this
 construction's validated default (`docs/bounded-witness-mixer.md`).
 
-**3. Zone decomposition (`zone_decomposition.py`) — fixes the *range*
-failure structurally and exactly, and can be made to guarantee its own
-cost.** Don't build one circuit for the whole network: partition into
+**3a. Zone decomposition (`zone_decomposition.py`) — fixes the *range*
+failure structurally and exactly.** Don't build one circuit for the whole network: partition into
 zones via a min tie-line-cut, solve each zone's matroid mixer
 independently (small qubit count each), plus one small assembly mixer
 over the contracted zone graph. Guaranteed **exact** by graphic-matroid
@@ -209,8 +229,8 @@ short-range-like, and push the genuinely long-range connections out to
 one small assembly problem instead of forcing the whole graph to absorb
 their cost.
 
-**Picking a zone size up front only gets you *a* cost, not a *controlled*
-one.** Decomposed cost turns out to have much higher seed-to-seed
+**3b. Cost-capped refinement — picking a zone size up front only gets you
+*a* cost, not a *controlled* one.** Decomposed cost turns out to have much higher seed-to-seed
 variance than whole-graph cost (coefficient of variation up to 99% at
 some sizes — decomposition trades one big averaging problem for many
 small independent ones, and a single "unlucky" zone can dominate a
@@ -265,12 +285,36 @@ that ladder, technique 2 (whole-graph, no decomposition) plateaus by
 fault-tolerant-ready construction on its own, but, as the table above
 already shows, well past a comfortable NISQ regime at these sizes.
 Technique 3 fixes that without exception on this data — at every size
-≥ 30 nodes, every seed, both conditions, decomposition alone already
-costs less than the whole-graph construction (5.6x-46.7x cheaper), and
-its cost-capped refinement guarantees the rest of the way: every seed,
-every condition, every size tested, lands under 500 CX (§6-8):
+≥ 30 nodes, every seed, both conditions, zone decomposition (3a) alone
+already costs less than the whole-graph construction (5.6x-46.7x
+cheaper), and its cost-capped refinement (3b) guarantees the rest of the
+way: every seed, every condition, every size tested, lands under 500 CX
+(§6-8):
 
 ![Synthetic ladder: whole-graph -> zone decomposition -> cost-capped refinement](results/construction_progression_plot.png)
+
+*(Technique 1, the exact construction, is deliberately absent from this
+figure. Its failure mode isn't cost — it's dropping candidates it can't
+find a small witness for, which shows up as an artificially LOW CX count
+next to an incomplete, non-functional mixer, and it doesn't scale to
+`n_nodes=150` long-range at all: brute-force enumeration is intractable
+there, which is exactly why this ladder measures technique 2 instead.)*
+
+The same three stages, measured for safety instead of cost:
+
+![Synthetic ladder: the same three stages, measured for safety instead of cost](results/synthetic_mass_progression_plot.png)
+
+Technique 2 alone leaks real, sometimes substantial probability (down to
+91% mean feasible mass on the hardest long-range condition); 3a tightens
+that considerably; 3b's cost-capped refinement is indistinguishable from
+perfect (1.0 mean feasible mass) at every size, on both conditions —
+cheaper AND safer than either stage before it, not a tradeoff between
+the two. (Technique 1 is absent here too, for a related but distinct
+reason: `mean_feasible_mass=1.0` is true of it BY CONSTRUCTION whenever
+it runs at all, so a leakage-axis comparison would show it as a flat,
+misleadingly perfect line that hides its actual failure mode —
+completeness, not leakage, already covered honestly via
+`dropped_candidates`/`fully_connected` in "Techniques" above.)
 
 At the hardest size tested (`n_nodes=150`), directly against the
 feasibility numbers above:
@@ -285,7 +329,7 @@ feasibility numbers above:
 ![Where the synthetic ladder lands relative to NISQ feasibility](results/synthetic_nisq_feasibility_plot.png)
 
 On synthetic data: more decomposition, less cost, no exceptions — and
-technique 3's cost-capped refinement is what actually earns NISQ
+technique 3b's cost-capped refinement is what actually earns NISQ
 feasibility on the harder, long-range condition.
 
 ### On real data, the same clean story holds
@@ -359,8 +403,9 @@ reproduce the committed files in `results/` exactly, modulo `qiskit`/
 `networkx` version differences in transpilation.
 
 This reproduces what's *shown* here, not every measurement behind it —
-`construction_progression_plot.png` and `synthetic_nisq_feasibility_plot.png`
-read already-committed CSVs (`results/cost_aware_scaling_ladder_*.csv`,
+`construction_progression_plot.png`, `synthetic_mass_progression_plot.png`,
+and `synthetic_nisq_feasibility_plot.png` all read already-committed CSVs
+(`results/cost_aware_scaling_ladder_*.csv`,
 `decomposed_cost_aware_ladder_*.csv`, `cost_capped_decomposition_*.csv`)
 rather than re-deriving them from scratch. To regenerate those (or dig
 into the fuller investigation — the escalating realism ladder, the
@@ -415,7 +460,7 @@ QAOA performance.
     `run_best_of_both_ladder.py`, `run_hierarchical_decomposed_ladder.py`,
     `run_cost_capped_decomposition.py`, `run_real_networks_hierarchical.py`.
   - **Figures**: `plot_illustrations.py` (explanatory diagrams, not
-    measurements), `plot_results_figures.py` (this README's four result
+    measurements), `plot_results_figures.py` (this README's five result
     figures, from already-committed CSVs, no re-measurement).
 - `results/` — one CSV/plot pair per script above, all generated, none
   hand-edited. `*_before_minimization.*` files are pre-fix numbers, kept
