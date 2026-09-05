@@ -123,15 +123,13 @@ mismatch risks **leakage** — probability that ends up on an infeasible
 mass** is the complement, measured per trajectory: start from one
 feasible configuration, apply the mixer, and add up how much probability
 is still on feasible states afterward — 1.0 means that trajectory leaked
-nothing; less than 1.0 means some did. Averaged over many random
-starting configurations, this is the **mean feasible mass** reported
-throughout this document (and **unsafe rate**, the fraction of those
-starting points where *any* leakage occurred at all). Both are measured
-empirically (`leakage_trace.py` — exact for small instances, sampled via
-Wilson's algorithm at scale), not assumed from a term's abstract
-witness-search leakage rate alone: a term that looks leaky in isolation
-can cost little real mass if the states it misclassifies are rarely
-reached in practice, or the reverse.
+nothing; less than 1.0 means some did. Averaged over many random starting
+configurations, this is the **mean feasible mass** reported throughout
+this document, measured empirically (`leakage_trace.py` — exact for
+small instances, sampled via Wilson's algorithm at scale), not assumed
+from a term's abstract witness-search leakage rate alone: a term that
+looks leaky in isolation can cost little real mass if the states it
+misclassifies are rarely reached in practice, or the reverse.
 
 **This is the actual question this repo measures**: how much does that
 conditioning cost, in gates and circuit depth, and does that cost grow or
@@ -294,16 +292,16 @@ way: every seed, every condition, every size tested, lands under 500 CX
 ![Synthetic ladder: whole-graph -> zone decomposition -> cost-capped refinement](results/construction_progression_plot.png)
 
 *(Technique 1, the exact construction, is deliberately absent from this
-figure. Its failure mode isn't cost — it's dropping candidates it can't
-find a small witness for, which shows up as an artificially LOW CX count
-next to an incomplete, non-functional mixer, and it doesn't scale to
-`n_nodes=150` long-range at all: brute-force enumeration is intractable
-there, which is exactly why this ladder measures technique 2 instead.
-Checked directly, not just argued — `docs/scaling-ladder-and-decomposition.md`'s
-"Why isn't the exact construction on this ladder too?" measures it on
-these same graphs at the two sizes where it's tractable, and finds
-exactly this: 75 CX and fully disconnected, 43% of candidates dropped,
-at `long_log, n_nodes=30`.)*
+figure and the one below. Its failure mode is dropping candidates it
+can't find a small witness for — checked directly on these same graphs
+in `docs/scaling-ladder-and-decomposition.md`, that makes it look
+artificially CHEAP here (75 CX, fully disconnected, 43% of candidates
+dropped, at `long_log, n_nodes=30` — cheaper than the whole-graph
+construction that actually works) and would make it look artificially
+PERFECT on the mass plot below (`mean_feasible_mass=1.0`, since a dropped
+candidate isn't leaky, it's just absent). It also doesn't scale to
+`n_nodes=150` long-range at all — brute-force enumeration is intractable
+there, which is exactly why this ladder measures technique 2 instead.)*
 
 The same three stages, measured for safety instead of cost:
 
@@ -314,12 +312,7 @@ Technique 2 alone leaks real, sometimes substantial probability (down to
 that considerably; 3b's cost-capped refinement is indistinguishable from
 perfect (1.0 mean feasible mass) at every size, on both conditions —
 cheaper AND safer than either stage before it, not a tradeoff between
-the two. (Technique 1 is absent here too, for a related but distinct
-reason: `mean_feasible_mass=1.0` is true of it BY CONSTRUCTION whenever
-it runs at all, so a leakage-axis comparison would show it as a flat,
-misleadingly perfect line that hides its actual failure mode —
-completeness, not leakage, already covered honestly via
-`dropped_candidates`/`fully_connected` in "Techniques" above.)
+the two.
 
 At the hardest size tested (`n_nodes=150`), directly against the
 feasibility numbers above:
@@ -464,9 +457,7 @@ QAOA performance.
     `run_fixed_alpha_ladder.py`, `run_decomposed_cost_aware_ladder.py`,
     `run_best_of_both_ladder.py`, `run_hierarchical_decomposed_ladder.py`,
     `run_cost_capped_decomposition.py`, `run_real_networks_hierarchical.py`,
-    `exact_construction_ladder_check.py` (measures technique 1 directly on
-    the ladder's own graphs, confirming why it's excluded from the
-    progression figures below — misleads on cost and safety at once).
+    `exact_construction_ladder_check.py`.
   - **Figures**: `plot_illustrations.py` (explanatory diagrams, not
     measurements), `plot_results_figures.py` (this README's five result
     figures, from already-committed CSVs, no re-measurement).
