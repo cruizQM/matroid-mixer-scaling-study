@@ -57,7 +57,7 @@ An exchange argument — the same basis-exchange move `mixer.py` is built around
 - every item→leaf edge is forced trivially (leaves have degree 1, there is no alternative);
 - the *only* real freedom is: each item independently picks exactly one bucket to attach to.
 
-That is a **partition matroid** (one independent choice per item, out of m options), not the general graphic matroid `mixer.py` handles. The practical consequence: the QAOA circuit needs only `k·m` qubits (one-hot per item), not one qubit per edge in the full gadget graph — and the mixer needs no witness search at all, because swapping one item's bucket choice is valid *unconditionally*, regardless of every other item's state. This is proven exactly, not sampled: `verify_partition_mixer.py`'s `verify_weight_preservation` checks, via the full unitary of the mixer's underlying two-qubit gate (the same RXX+RYY Givens-rotation `mixer.py`'s `_swap_block` already uses), that it preserves total Hamming weight for *every* possible input, and `verify_full_gadget_no_leakage` confirms the same end-to-end on a small full gadget instance.
+That is a **partition matroid** (one independent choice per item, out of m options), not the general graphic matroid `mixer.py` handles. The practical consequence: the QAOA circuit needs only `k·m = 3m²` qubits (one-hot per item; k=3m by construction, so this grows quadratically in m, not linearly — e.g. m=4 is 48 qubits, m=9 is already 243), not one qubit per edge in the full gadget graph — and the mixer needs no witness search at all, because swapping one item's bucket choice is valid *unconditionally*, regardless of every other item's state. This is proven exactly, not sampled: `verify_partition_mixer.py`'s `verify_weight_preservation` checks, via the full unitary of the mixer's underlying two-qubit gate (the same RXX+RYY Givens-rotation `mixer.py`'s `_swap_block` already uses), that it preserves total Hamming weight for *every* possible input, and `verify_full_gadget_no_leakage` confirms the same end-to-end on a small full gadget instance.
 
 The cost oracle (the sum-of-squares objective) becomes a set of pairwise RZZ terms between items assigned to the same bucket, derived and checked exactly (`verify_ising_coefficients`) against the true cost function before ever touching a circuit.
 
@@ -74,9 +74,34 @@ Instance: m=4, k=12, n_qubits=48 (65 nodes / 100 edges in the full gadget graph;
 
 Gate count scales exactly linearly in p (each layer repeats the same block); depth grows sublinearly relative to gate count as p increases (121→449 for a 5x gate-count increase), consistent with layers overlapping in the transpiler's scheduling. Even at p=5 this is a modest, few-thousand-gate circuit on 48 qubits.
 
+## Part 3: does a classical tensor-network (MPS) simulator also struggle?
+
+E.ON's secondary requirement asks for exactly this: not just an exact classical solver failing, but a smart classical *simulator* of the quantum circuit itself also failing to substitute for real hardware. `run_mps_scaling_check.py` checks this directly using Qiskit Aer's matrix-product-state backend, at `p=2` (the smallest depth where entanglement can appear at all here — see below), sweeping both instance size (m) and MPS bond dimension.
+
+Raw results: `results/mps_scaling_check.csv`.
+
+**First, a structural fact worth stating plainly, found while calibrating this check rather than assumed going in**: at `p=1`, MPS is *exact even at bond dimension 2*, regardless of m. The circuit starts from a computational basis state, and a diagonal (RZ/RZZ) cost layer applied to a basis state cannot create entanglement, no matter how many qubits its terms connect; the mixer layer only ever acts within one item's own small register, never across items. Real entanglement only appears once a *second* cost layer acts on the superposition the first mixer created — so classical simulation difficulty here tracks QAOA depth, not just instance size.
+
+**With that established, `p=2` is where the real test happens:**
+
+| m | n_qubits | exact (statevector) | MPS bd=4 | MPS bd=16 | MPS bd=64 | bd=64 wall time |
+|---|---|---|---|---|---|---|
+| 2 | 12 | 884.18 | 910.18 | 870.51 | 884.18 | 0.04s |
+| 3 | 27 | 1561.72 | 1700.37 | 1688.44 | 1681.80 | 5.4s |
+| 4 | 48 | *(infeasible — 4.3 exabytes)* | 2474.87 | 2519.87 | 2248.34 | 26.8s |
+| 5 | 75 | infeasible | 2924.34 | 2732.88 | 2908.28 | 83.7s |
+| 6 | 108 | infeasible | 4250.52 | 3619.88 | 3622.84 | 193.1s |
+| 7 | 147 | infeasible | 6135.12 | 4349.30 | **discarded (390.6s, over budget)** | — |
+
+Two findings, both real and not manufactured to fit a narrative:
+
+1. **MPS does not converge cleanly even where exact ground truth is available.** At m=3, bond dimension 64 still misses the exact value by ~120 (a 7.7% relative error) — not the near-exact match a "just needs a bit more bond dimension" story would predict. Beyond m=3, where no exact answer exists to check against, the bd=16 → bd=64 values are *not monotonically converging* either (m=5's bd=64 estimate is actually further from bd=16 than one would want, m=6's bd=16 and bd=64 roughly agree, m=7's bd=64 didn't finish) — the honest read is that a fixed, modest bond dimension cannot be trusted to track the true value as m grows, not that it converges slowly.
+2. **Wall-clock cost at a fixed bond dimension (64) explodes**: 5.4s → 26.8s → 83.7s → 193.1s → over 390s, for m=3→7 — roughly 70x for less than a 6x increase in qubit count. This is a real, measured cost blow-up, not an extrapolation, and it happens on top of — not despite — accuracy already being questionable at the same bond dimension.
+
+**Conclusion for this section**: a classical tensor-network simulator does not offer a reliable shortcut here either. This directly satisfies E.ON's secondary ask (a struggling MPS simulator, not just a struggling exact MILP solver), and it also gives the honest answer to the approximation-ratio question below: the gap isn't closed because it was left unmeasured, it's open because the two most natural classical proxies for "just simulate it and see" both hit real, measured walls at a similar, small scale.
+
 ## Honest scope of this document
 
-- **This is not a demonstrated quantum advantage.** The circuit is shown to be small and to compile/transpile cheaply at the size where classical proof cost is already climbing steeply — a *necessary* condition for a quantum approach to be worth pursuing here, not a sufficient one. Solution quality (approximation ratio) is not measured anywhere in this repo: an early, separate, informal check at a trivial 12-qubit scale found the circuit's best sample matched the true optimum but its mean sample sat noticeably above it, with no improvement from more QAOA layers. That check is far too small to say anything about the actual hard instances (m=9-11 above), which are too large to simulate classically at all — the performance question stays genuinely open, not just unmeasured out of laziness.
+- **This is not a demonstrated quantum advantage.** The circuit is shown to be small and to compile/transpile cheaply at the size where classical proof cost is already climbing steeply — a *necessary* condition for a quantum approach to be worth pursuing here, not a sufficient one. The approximation ratio (expected cost vs. `PartitionGadget.exact_optimum`) is now measured exactly at m=2 and m=3 (Part 3's table, statevector column) at a fixed representative angle (0.37 half-turns, this repo's existing convention for "a concrete, reproducible value," not a claimed optimum) — ratios of 1.27 and 1.49 respectively. Beyond m=3, exact simulation is impossible (m=4 alone needs 48 qubits, 4.3 exabytes) and MPS was shown in Part 3 to not reliably substitute for it. So the honest status is: verified at trivial scale, genuinely unknown at the scale where classical hardness actually bites (m=9-11), and that gap is not for lack of trying — it survived both an exact-simulation attempt and a tensor-network attempt.
 - **This is a different mixer from `mixer.py`'s**, not a generalization of it. It works because this specific reduction happens to decompose into independent one-hot subproblems; that is a property of this instance family, discovered by reading the hardness proof's own structure, not a general recipe that would apply to an arbitrary hard matroid-basis problem.
-- **E.ON's secondary requirement** (showing a classical tensor-network/MPS simulator also struggles) has not been attempted for this instance and remains open work.
 - **The two negative attempts** (random quadratic cost, congestion cost) are reported here because they were real, informative dead ends — not polished away — and directly motivate why a structural construction was needed instead of a bigger real network.

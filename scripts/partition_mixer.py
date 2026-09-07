@@ -47,6 +47,7 @@ from __future__ import annotations
 
 from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter
+from qiskit.quantum_info import SparsePauliOp
 
 from partition_gadget import PartitionGadget
 
@@ -106,6 +107,49 @@ def qaoa_circuit(gadget: PartitionGadget, p: int, measure: bool = True) -> Quant
     if measure:
         qc.measure(range(n), range(n))
     return qc
+
+
+def cost_hamiltonian(gadget: PartitionGadget) -> SparsePauliOp:
+    """The RZ/RZZ Hamiltonian `cost_layer` implements, as a `SparsePauliOp`
+    -- lets any Aer backend (statevector, matrix_product_state, ...)
+    compute its EXACT expectation value internally via
+    `QuantumCircuit.save_expectation_value`, without ever materializing a
+    2^n_qubits array in Python. Add `hamiltonian_constant_offset(gadget)`
+    to the result to get the expected value of the true (`bucket_cost`)
+    reconfiguration cost, not just the Hamiltonian's own (shifted) value."""
+    n = gadget.n_qubits
+    labels: list[str] = []
+    coeffs: list[float] = []
+    for i in range(gadget.k):
+        c = gadget.linear_coeff(i)
+        if c == 0.0:
+            continue
+        for j in range(gadget.m):
+            lab = ["I"] * n
+            lab[n - 1 - gadget.qubit(i, j)] = "Z"
+            labels.append("".join(lab))
+            coeffs.append(c)
+    for i in range(gadget.k):
+        for i2 in range(i + 1, gadget.k):
+            c = gadget.quad_coeff(i, i2)
+            if c == 0.0:
+                continue
+            for j in range(gadget.m):
+                lab = ["I"] * n
+                lab[n - 1 - gadget.qubit(i, j)] = "Z"
+                lab[n - 1 - gadget.qubit(i2, j)] = "Z"
+                labels.append("".join(lab))
+                coeffs.append(c)
+    return SparsePauliOp(labels, coeffs)
+
+
+def hamiltonian_constant_offset(gadget: PartitionGadget) -> float:
+    """`bucket_cost(x) - diag_hamiltonian_value(x)` is the same constant
+    for every assignment x (checked exactly in
+    `verify_partition_mixer.verify_ising_coefficients`) -- computed here
+    from one arbitrary reference assignment."""
+    ref = tuple([0] * gadget.k)
+    return gadget.bucket_cost(ref) - gadget.diag_hamiltonian_value(ref)
 
 
 def bits_to_assignment(gadget: PartitionGadget, bits: str) -> tuple[int, ...] | None:
