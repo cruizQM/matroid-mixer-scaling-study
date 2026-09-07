@@ -237,18 +237,61 @@ whichever gives the cheaper total if it's over.
 
 This repo shows the mixer **construction** is correct and scales — both
 exactly (fault-tolerant-relevant) and, via decomposition and cost-capping,
-cheaply enough for a plausible NISQ target (real-topology-relevant). It
-does **not** show a quantum algorithm outperforming a classical baseline:
-there is no cost-Hamiltonian/oracle integration, no QAOA execution, no
-classical solver comparison, and no test of the iterative boundary
-coupling (an ADMM-style loop) this kind of decomposition would need for
-the actual optimization objective — only the radiality constraint,
-tested here, decomposes exactly. Classical formulations of the same
-constraint still need explicit penalty terms or solver-enforced
-constraints; this mixer builds feasibility into the dynamics directly —
-that's the promise a bounded-cost result is a *precondition* for, not
-proof of. See `methodology.md` for the precise boundary of what was
-measured.
+cheaply enough for a plausible NISQ target (real-topology-relevant). For
+the main radiality-constraint scaling story above, it does **not** show a
+quantum algorithm outperforming a classical baseline: no cost-Hamiltonian/
+oracle integration, no QAOA execution, no classical solver comparison,
+and no test of the iterative boundary coupling (an ADMM-style loop) this
+kind of decomposition would need for the actual optimization objective —
+only the radiality constraint, tested here, decomposes exactly. Classical
+formulations of the same constraint still need explicit penalty terms or
+solver-enforced constraints; this mixer builds feasibility into the
+dynamics directly — that's the promise a bounded-cost result is a
+*precondition* for, not proof of. See `methodology.md` for the precise
+boundary of what was measured.
+
+A separate, narrower case study *does* include all three of those pieces
+— see below.
+
+## A provably hard instance, with a real classical/quantum comparison
+
+The scaling story above says nothing about whether any *particular*
+instance is hard for a classical solver — and this repo's own mixer
+construction (enumerate the feasible set, search for exchange witnesses)
+structurally cannot even be built on an instance whose feasible set isn't
+enumerable, which is close to a definition of "classically easy." A
+separate case study asks the sharper question directly: build a
+*specific, verifiable* instance of the same problem class that is hard
+even at small size, and see whether a matching quantum circuit for it
+stays small.
+
+Using a real, published NP-hardness reduction (Khodabakhsh et al.,
+arXiv:1711.03517, 3-PARTITION → radial reconfiguration), measured
+directly rather than assumed:
+
+- **Classical hardness, measured**: CP-SAT proof time grows from 1.3s to
+  a 30-minute unproved timeout as the instance grows from 65 to 177
+  nodes — small graphs, real solver failure.
+- **A small matching circuit, derived from the proof itself**: the same
+  hardness proof reveals almost all of the instance's structure is
+  forced, leaving only a partition-matroid-shaped core — needing a
+  simpler, witness-free mixer than this repo's general one, verified
+  exactly via full-unitary checks, and only 48 qubits / ~800 two-qubit
+  gates at the size where classical proof already takes several seconds.
+- **Both a real solver and a real tensor-network (MPS) simulator
+  checked**: MPS doesn't offer a reliable shortcut either — it misses
+  the exact answer by ~8% even at bond dimension 64 on the smallest
+  checkable size, and its wall-clock cost grows ~70x over a size range
+  where the qubit count only grows ~6x.
+- **Honestly scoped**: this is evidence supporting, not proof of, a
+  quantum advantage — solution quality at the actual hard sizes remains
+  genuinely unmeasured, because both natural classical ways to check it
+  (exact simulation, MPS) hit real walls first.
+
+Full account, all three findings above with complete tables and the
+exact reasoning behind each: `docs/hard-instance-case-study.md`. Raw
+data: `results/hard_instance_hardness_sweep.csv`,
+`results/mps_scaling_check.csv`.
 
 ## How to reproduce
 
@@ -303,6 +346,10 @@ precise boundary).
   and direct validation on two real networks. The fullest, most detailed
   account in this repo — everything summarized in this README's Results
   section traces back to a section here.
+- `docs/hard-instance-case-study.md` — the provably hard instance, its
+  measured classical (CP-SAT) and classical-simulation (MPS) hardness,
+  and the small matching QAOA circuit derived from the hardness proof
+  itself.
 - `scripts/` and `results/` — one script per measurement, one CSV/plot
   pair per script, all generated, none hand-edited. Full script-by-script
   index: `docs/repository-map.md`.
