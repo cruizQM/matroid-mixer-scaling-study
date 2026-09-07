@@ -3,3 +3,4 @@ networkx>=3.0
 qiskit>=1.0
 matplotlib>=3.7
 pandapower>=2.14  # for scripts/real_feeders.py -- loads the published IEEE 33-bus test feeder
+ortools>=9.9  # for scripts/run_hardness_sweep.py -- classical (CP-SAT) verification of the hard-instance case study
