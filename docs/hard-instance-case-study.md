@@ -125,7 +125,7 @@ Raw results: `results/large_b_hardness_sweep.csv` (times, statuses, objectives, 
 | 5 (75) | 10,000 | same | **timed out** | >56.5 M | **unproved at 30 min** |
 | 6 (108) | 15 | 25 / 114 | 0.24s | 144,577 | proved, 24.6s |
 | 6 (108) | 1,000 | same | **timed out** | >55.7 M | **unproved at 30 min** |
-| 6 (108) | 10,000 | same | **timed out** | >54.5 M | *(running at time of writing)* |
+| 6 (108) | 10,000 | same | **timed out** | >54.5 M | **unproved at 30 min** |
 
 Every CP-SAT objective at B=15 matches the DP exactly. Where the DP timed out there is no exact value to compare against — CP-SAT's returned objective is a feasible solution neither route can certify, which is the point.
 
