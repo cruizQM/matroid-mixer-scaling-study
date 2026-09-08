@@ -28,6 +28,14 @@ alternatives.
 5. `real_nisq_feasibility_plot.png` -- both tiers on both real networks,
    against the same fidelity curves.
 
+Two more for the hard-instance case study (question 2), both in the
+README:
+
+6. `hard_instance_proof_time_plot.png` -- CP-SAT proof time vs. gadget
+   size, timeouts drawn as a wall.
+7. `mps_convergence_plot.png` -- MPS expected cost / true optimum vs.
+   bond dimension, one line per m, exact level where computable.
+
 (Two earlier figures were removed as redundant once the README's own
 sections were tightened: `ladder_cx_plot.png` -- its one line was already
 reproduced exactly as construction_progression_plot.png's whole-graph
@@ -310,9 +318,88 @@ def plot_real_network_comparison() -> None:
     print(f"wrote {out}")
 
 
+def plot_hard_instance_proof_time() -> None:
+    """Question 2's headline: CP-SAT's time to PROVE optimality on the
+    hard-instance gadget vs. instance size, from
+    results/hard_instance_hardness_sweep.csv. Timeouts (status != OPTIMAL)
+    are drawn hollow at the cap so the curve's end is visibly a wall, not
+    a data point. NO-instances (no perfect partition exists) are the
+    exhaustive direction and the one that matters."""
+    rows = _rows("hard_instance_hardness_sweep.csv")
+    cap = 1800.0
+    fig, ax = plt.subplots(figsize=(8, 4.6))
+    for suffix, color, marker, label in (("_yes", "#4472C4", "o", "perfect partition exists (YES)"),
+                                         ("_no", "#C0392B", "s", "no perfect partition (NO) — solver must exhaust")):
+        pts = sorted((int(r["n_nodes"]), float(r["wall_clock_s"]), r["status"] == "OPTIMAL")
+                     for r in rows if r["label"].endswith(suffix))
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        ax.plot(xs, ys, color=color, marker=marker, label=label)
+        for x, y, proved in pts:
+            if not proved:
+                ax.plot([x], [y], marker=marker, markersize=12, markerfacecolor="white", markeredgecolor=color,
+                        markeredgewidth=2, linestyle="none", zorder=4)
+                ax.annotate("unproved\nat cap", (x, y), textcoords="offset points", xytext=(-54, -26),
+                            fontsize=8, color=color)
+    ax.axhline(cap, color="black", ls="dashed", lw=1, label="30-minute cap")
+    ax.set_yscale("log")
+    ax.set_xlabel("gadget size (nodes)")
+    ax.set_ylabel("CP-SAT time to prove optimality (s)")
+    ax.set_title("A general-purpose solver gives up early on the hard instance", fontsize=11)
+    ax.grid(True, alpha=0.3, which="both")
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=8.5, bbox_to_anchor=(0.5, -0.02))
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    out = RESULTS_DIR / "hard_instance_proof_time_plot.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"wrote {out}")
+
+
+def plot_mps_convergence() -> None:
+    """Does a classical tensor-network (MPS) simulator converge on the
+    hard-instance circuit as bond dimension grows? From
+    results/mps_scaling_check.csv, p=2. Plotted as expected cost over the
+    true optimum so every m shares one axis; where an exact statevector
+    value exists (m=2, m=3) it is drawn as a dashed level in the same
+    color -- the gap to it at the largest bond dimension is the point.
+    The m=7, bond-64 run that exceeded its time budget is absent."""
+    rows = _rows("mps_scaling_check.csv")
+    ms = sorted({int(r["m"]) for r in rows})
+    cmap = plt.get_cmap("viridis")
+    fig, ax = plt.subplots(figsize=(8, 4.6))
+    for i, m in enumerate(ms):
+        color = cmap(i / max(1, len(ms) - 1))
+        mps = sorted((int(r["bond_dim"]), float(r["expected_cost"]) / float(r["exact_optimum"]))
+                     for r in rows if int(r["m"]) == m and r["method"] == "mps" and r["expected_cost"])
+        if not mps:
+            continue
+        xs, ys = zip(*mps)
+        ax.plot(xs, ys, marker="o", color=color, label=f"m={m} ({3 * m * m} qubits)")
+        exact = [float(r["expected_cost"]) / float(r["exact_optimum"])
+                 for r in rows if int(r["m"]) == m and r["method"] == "statevector" and r["expected_cost"]]
+        if exact:
+            ax.hlines(exact[0], xs[0], xs[-1], color=color, ls="dashed", lw=1.2)
+    ax.plot([], [], color="grey", ls="dashed", label="exact (statevector), where computable")
+    ax.set_xscale("log", base=2)
+    ax.set_xlabel("MPS bond dimension")
+    ax.set_ylabel("expected cost / true optimum")
+    ax.set_title("MPS does not converge to the exact answer at modest bond dimension (p=2)", fontsize=11)
+    ax.grid(True, alpha=0.3, which="both")
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=4, fontsize=8.5, bbox_to_anchor=(0.5, -0.04))
+    fig.tight_layout(rect=(0, 0.1, 1, 1))
+    out = RESULTS_DIR / "mps_convergence_plot.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"wrote {out}")
+
+
 if __name__ == "__main__":
     plot_construction_progression()
     plot_synthetic_mass_progression()
     plot_synthetic_nisq_feasibility()
     plot_real_nisq_feasibility()
     plot_real_network_comparison()
+    plot_hard_instance_proof_time()
+    plot_mps_convergence()

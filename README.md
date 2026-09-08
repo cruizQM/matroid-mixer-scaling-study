@@ -31,7 +31,9 @@ questions about it, in order:
 
 The second question is the one most quantum-optimization work skips.
 
-## The problem, and the move that keeps it feasible
+## Question 1: can the mixer be made cheap enough for real hardware?
+
+### The problem, and the move that keeps it feasible
 
 A distribution feeder has more switches than it strictly needs: a
 normally-closed backbone, plus a handful of normally-open **tie**
@@ -69,7 +71,7 @@ feeder. Measured on published topologies, real ties span 33–45% of the
 network's diameter. Real topology is the expensive case, and everything
 in the next section is about paying that cost down.
 
-## Two ways to make it cheap
+### Two ways to make it cheap
 
 **Tier 1 — whole graph, for fault-tolerant hardware.** Build the mixer
 on the entire network, but cap how many qubits any single term may
@@ -106,7 +108,7 @@ exact condition exists it silently drops the exchange, and on real
 topology that leaves the mixer disconnected. `docs/circuit-validity.md`
 traces that failure.)*
 
-## Results
+### Results
 
 Where the tiers land is judged against a simple yardstick. With
 published two-qubit error rates, a circuit's chance of running cleanly
@@ -174,7 +176,9 @@ short-range control condition, and the safety measurements not shown
 here — is in `docs/scaling-ladder-and-decomposition.md` and
 `docs/bounded-witness-mixer.md`.
 
-## The second question: does it matter?
+## Question 2: is the problem hard enough to need quantum?
+
+### Where hardness has to come from
 
 So the mixer runs, cheaply, on real grids. The obvious next question is
 whether a quantum computer was ever needed. For the real grids above —
@@ -191,52 +195,73 @@ configurations, the objective barely matters.
 Hardness, then, has to come from the combinatorics, not the topology.
 So this repo takes a published NP-hardness proof for exactly this
 problem — radial reconfiguration under a loss-minimizing objective
-(Khodabakhsh et al., arXiv:1711.03517) — and builds the hard instance
-it describes. Three things were measured, not assumed, each answering a
-different objection:
+(Khodabakhsh et al., arXiv:1711.03517) — and builds the instances it
+describes.
 
-- **"A classical solver would just handle it."** The honest measure of
-  classical hardness is not how fast a solver *finds* a good tree —
-  heuristics do that quickly on almost anything — but how fast it can
-  *prove* the tree is optimal. CP-SAT's proof time grows from a few
-  seconds on a 65-node instance to a 30-minute timeout, proof
-  unfinished, at 177 nodes. Every point is cross-checked against an
-  independent exact calculation — and that calculation is the caveat.
-  It is a dynamic program that exploits the very structure the
-  hardness proof exposes, and at the fixed bucket size used here it
-  runs in milliseconds. So what fails is a general-purpose solver on
-  the natural formulation, not every classical route. Genuine hardness
-  needs the bucket size to grow with the instance — which inflates
-  every classical route but leaves the quantum circuit's size untouched.
-  That is the next experiment.
-- **"Then the quantum circuit must be enormous."** Tier 1 and Tier 2
-  can't even be started on this instance: both begin by enumerating the
-  feasible set, and here that set is astronomically large — which is
-  precisely *why* the instance is hard. The way in is the hardness
-  proof itself. It reveals that almost every edge of the instance is
-  forced, and the few free choices are independent of one another.
-  Independent choices need no conditioning, so the mixer needs no
-  witness search at all — and 48 qubits with about 800 two-qubit gates
-  cover the 65-node instance where the classical solver already takes
-  seconds.
-- **"A classical computer could just simulate that circuit."** A small
-  circuit only matters if it can't be shortcut classically, and
-  tensor-network (MPS) methods are the strongest classical tool for
-  circuits like this one. MPS misses the exact answer by about 8% on
-  the smallest instance it can be checked against, and its cost grows
-  roughly 70× over a range where the circuit itself grows about 14× —
-  the excess is entanglement, not size. This was one simulator at
-  modest bond dimension, though; a stronger tensor-network attempt is
-  the obvious next test.
+### The instance, and why its circuit is small
 
-Notice what just happened: the hard instance needed a *simpler* mixer
-than the real grids did. That is not a contradiction — it is the key to
-how the two halves of this repo fit together. Real grids are
+The proof encodes a classic hard problem, 3-PARTITION, as a network: a
+root, a few *bucket* nodes, a set of *item* nodes each carrying a
+weight, and every item connected to every bucket. Reconfiguring it
+optimally is the same as sorting the items into buckets of equal total
+weight.
+
+![The hard instance: almost every edge is forced; only the item-to-bucket choice is free](results/illustration_partition_gadget.png)
+
+Tier 1 and Tier 2 can't even be started on this network: both begin by
+enumerating the feasible set, and here that set is astronomically
+large — which is precisely *why* the instance is hard. The way in is
+the hardness proof itself. It shows that almost every edge is forced
+into every optimal tree, and the only free choice — which bucket each
+item joins — is independent from item to item. Independent choices
+need no conditioning, so the mixer needs no witness search at all. The
+result: 48 qubits with about 800 two-qubit gates cover a 65-node
+instance, and the circuit's size depends only on the number of buckets
+and items — not on the weights.
+
+### Results
+
+Three things were measured, not assumed, each answering a different
+objection.
+
+**"A classical solver would just handle it."** The honest measure of
+classical hardness is not how fast a solver *finds* a good tree —
+heuristics do that quickly on almost anything — but how fast it can
+*prove* the tree is optimal.
+
+![A general-purpose solver gives up early on the hard instance](results/hard_instance_proof_time_plot.png)
+
+CP-SAT's proof time grows from a few seconds on a 65-node instance to a
+30-minute timeout, proof unfinished, at 177 nodes. Every point is
+cross-checked against an independent exact calculation — and that
+calculation is the caveat. It is a dynamic program that exploits the
+very structure the hardness proof exposes, and at the fixed bucket size
+used here it runs in milliseconds. So what fails is a general-purpose
+solver on the natural formulation, not every classical route. Genuine
+hardness needs the bucket size to grow with the instance — which
+inflates every classical route but leaves the quantum circuit's size
+untouched. That is the next experiment.
+
+**"A classical computer could just simulate that circuit."** A small
+circuit only matters if it can't be shortcut classically, and
+tensor-network (MPS) methods are the strongest classical tool for
+circuits like this one.
+
+![MPS does not converge to the exact answer at modest bond dimension](results/mps_convergence_plot.png)
+
+MPS misses the exact answer by about 8% on the smallest instance it
+can be checked against, and its cost grows roughly 70× over a range
+where the circuit itself grows about 14× — the excess is entanglement,
+not size. This was one simulator at modest bond dimension, though; a
+stronger tensor-network attempt is the obvious next test.
+
+**"Then the two halves of this repo contradict each other."** The hard
+instance needed a *simpler* mixer than the real grids did. That is not
+a contradiction — it is the key to how the halves fit. Real grids are
 *structurally* hard to stay feasible on — long loops, expensive
-conditions — but *combinatorially* easy to solve. The
-hard family is the mirror image: structurally trivial, combinatorially
-hard in general. Each construction handles the axis its problem
-actually has.
+conditions — but *combinatorially* easy to solve. The hard family is
+the mirror image: structurally trivial, combinatorially hard in
+general. Each construction handles the axis its problem actually has.
 Whether an instance exists that is hard on both axes at once is an open
 question this repo does not answer.
 
@@ -278,9 +303,6 @@ python scripts/verify_correctness.py && python scripts/verify_leakage_trace.py
 
 python scripts/run_real_networks_hierarchical.py
 # the real-network figures above: both tiers, both networks, 5 seeds each.
-
-python scripts/plot_results_figures.py && python scripts/plot_illustrations.py
-# every figure in this README, from already-committed data.
 ```
 
 **Question 2 — the hard instance:**
@@ -295,6 +317,13 @@ python scripts/measure_partition_mixer.py
 
 python scripts/run_hardness_sweep.py       # CP-SAT hardness curve (slow: hours)
 python scripts/run_mps_scaling_check.py    # the MPS comparison (~15 min)
+```
+
+**Every figure in this README**, both questions, from already-committed
+data:
+
+```
+python scripts/plot_results_figures.py && python scripts/plot_illustrations.py
 ```
 
 The circuit-construction scripts are deterministic (fixed seeds) and
@@ -315,7 +344,7 @@ the scripts indexed in `docs/repository-map.md`.
   the leakage measurement, and the cost-aware search.
 - `docs/scaling-ladder-and-decomposition.md` — the synthetic ladder,
   Tier 2 in full, safety measurements, and the real-network validation.
-  Everything in Results traces back to it.
+  Everything in question 1's results traces back to it.
 - `docs/hard-instance-case-study.md` — question 2 in full: the
   instance, the solver curve, the small circuit, and the MPS check.
 - `scripts/` and `results/` — one script per measurement, one CSV/plot

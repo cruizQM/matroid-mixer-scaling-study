@@ -21,7 +21,9 @@ import networkx as nx
 import numpy as np
 from matplotlib.colors import ListedColormap
 
+from gadget_graph import build_gadget_graph
 from graphs import generate_feeder_graph, generate_feeder_graph_long_range_ties
+from partition_gadget import PartitionGadget
 from zone_decomposition import build_assembly_graph, partition_zones_by_size
 
 RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
@@ -349,6 +351,84 @@ def plot_bounded_witness_concept() -> None:
     print(f"wrote {out}")
 
 
+def plot_partition_gadget() -> None:
+    """The hard-instance gadget (docs/hard-instance-case-study.md) at its
+    smallest legal size, m=2 buckets / k=6 items, drawn in layers so the
+    point is visible at a glance: every grey edge is FORCED into every
+    optimal tree by an exchange argument, and the only real choice is
+    which bucket each item attaches to -- the red-dashed bipartite layer.
+    One valid assignment (a perfect 3-partition) is drawn solid green.
+    This is why the circuit needs only k*m qubits and no witness search:
+    the free choices are independent of one another."""
+    gadget = PartitionGadget(items=(3,) * 6, m=2, B=9)
+    gg = build_gadget_graph(gadget)
+    m, k = gadget.m, gadget.k
+    root, buckets, items = 0, list(range(1, 1 + m)), list(range(1 + m, 1 + m + k))
+
+    leaf_parent = {}
+    for i, (u, v) in enumerate(gg.edges):
+        if i not in gg.bipartite_edge_of and u != root:
+            leaf_parent[v] = u
+    leaves_of = {v: [lf for lf, p in leaf_parent.items() if p == v] for v in items}
+
+    pos = {root: (0.0, 3.0)}
+    for j, u in enumerate(buckets):
+        pos[u] = ((j - (m - 1) / 2) * 3.0, 2.0)
+    for i, v in enumerate(items):
+        pos[v] = ((i - (k - 1) / 2) * 1.1, 1.0)
+        for li, lf in enumerate(leaves_of[v]):
+            pos[lf] = (pos[v][0] + (li - (len(leaves_of[v]) - 1) / 2) * 0.4, 0.0)
+
+    # One perfect partition: alternate items between the two buckets.
+    assignment = tuple(i % m for i in range(k))
+    chosen = set()
+    for ei, (u, v) in gg.bipartite_edge_of.items():
+        if u == buckets[assignment[items.index(v)]]:
+            chosen.add(ei)
+
+    forced = [gg.edges[i] for i in range(len(gg.edges)) if i not in gg.bipartite_edge_of]
+    free_unchosen = [gg.edges[i] for i in gg.bipartite_edge_of if i not in chosen]
+    free_chosen = [gg.edges[i] for i in chosen]
+
+    g = nx.Graph()
+    g.add_nodes_from(range(gg.n_nodes))
+    g.add_edges_from(gg.edges)
+
+    fig, ax = plt.subplots(figsize=(11, 5.5))
+    nx.draw_networkx_edges(g, pos, ax=ax, edgelist=forced, edge_color="#B0B0B0", width=1.8)
+    nx.draw_networkx_edges(g, pos, ax=ax, edgelist=free_unchosen, edge_color="#E8746A", width=1.2, style="dashed", alpha=0.7)
+    nx.draw_networkx_edges(g, pos, ax=ax, edgelist=free_chosen, edge_color="#2E8B57", width=2.8)
+
+    role_color = {root: "#333333"}
+    role_color.update({u: "#C0392B" for u in buckets})
+    role_color.update({v: "#2E8B57" for v in items})
+    node_colors = [role_color.get(n, "#B0B0B0") for n in g.nodes()]
+    node_sizes = [520 if n == root else 420 if n in buckets else 340 if n in items else 120 for n in g.nodes()]
+    nx.draw_networkx_nodes(g, pos, ax=ax, node_color=node_colors, node_size=node_sizes, edgecolors="white")
+    labels = {root: "r"}
+    labels.update({u: f"u{j}" for j, u in enumerate(buckets)})
+    labels.update({v: f"a={gadget.items[i]}" for i, v in enumerate(items)})
+    nx.draw_networkx_labels(g, pos, ax=ax, labels=labels, font_size=8, font_color="white")
+
+    ax.text(-4.9, 3.0, "root", fontsize=9, va="center", color="#333333")
+    ax.text(-4.9, 2.0, f"{m} buckets", fontsize=9, va="center", color="#C0392B")
+    ax.text(-4.9, 1.0, f"{k} items (weight a)", fontsize=9, va="center", color="#2E8B57")
+    ax.text(-4.9, 0.0, "a−1 leaves each", fontsize=9, va="center", color="#888888")
+    ax.set_xlim(-5.2, 4.2)
+    ax.axis("off")
+    handles = [
+        plt.Line2D([0], [0], color="#B0B0B0", lw=1.8, label="forced into every optimal tree"),
+        plt.Line2D([0], [0], color="#E8746A", lw=1.2, ls="dashed", label="free: which bucket does this item join?"),
+        plt.Line2D([0], [0], color="#2E8B57", lw=2.8, label="one valid choice (a perfect partition)"),
+    ]
+    ax.legend(handles=handles, loc="lower center", fontsize=8.5, bbox_to_anchor=(0.5, -0.12), ncol=3)
+    ax.set_title("The hard instance: almost every edge is forced; only the item→bucket choice is free", fontsize=11)
+    fig.tight_layout()
+    out = RESULTS_DIR / "illustration_partition_gadget.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    print(f"wrote {out}")
+
+
 def _flow_box(ax, xy, w, h, text, facecolor, fontsize=9.5):
     box = mpatches.FancyBboxPatch(
         (xy[0] - w / 2, xy[1] - h / 2), w, h,
@@ -441,3 +521,4 @@ if __name__ == "__main__":
     plot_the_decomposition()
     plot_bounded_witness_concept()
     plot_cost_capped_decomposition_concept()
+    plot_partition_gadget()
