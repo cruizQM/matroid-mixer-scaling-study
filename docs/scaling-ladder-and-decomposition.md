@@ -170,9 +170,14 @@ past a floor size.
 
 A fair question about section 2's own figures (and the README's
 `construction_progression_plot.png` / `synthetic_mass_progression_plot.png`,
-which reuse this same data): they compare the cost-aware bounded-witness
-mixer against its own decomposed and cost-capped variants, but never
-against the exact construction directly. Checked directly, not assumed:
+which reuse this same data — the README embeds only the cost plot, and
+only its long-range condition; the short-range control and the safety
+companion are generated but live here): they compare the
+cost-aware bounded-witness mixer against its cost-capped decomposed
+variant (those two being the repo's two deployment tiers — both figures
+were narrowed to just those, dropping the intermediate
+zone-decomposition-only line that this document still covers in full
+below), but never against the exact construction directly. Checked directly, not assumed:
 `scripts/exact_construction_ladder_check.py` builds the EXACT
 construction (`build_matroid_mixer`, brute-force witness search, no cost
 awareness) on these same `CONDITIONS` graphs, at the two sizes where

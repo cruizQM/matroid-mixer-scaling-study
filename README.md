@@ -1,358 +1,296 @@
-# Matroid basis-exchange QAOA mixer: scaling study
+# A feasibility-preserving QAOA mixer for grid reconfiguration — and a hard instance to point it at
 
-## The question
+## Two questions, one problem
 
-**The pitch, one level up**: QAOA's biggest practical obstacle on
-constrained problems usually isn't the cost Hamiltonian — it's keeping
-the search feasible at all, typically patched with penalty terms that
-waste circuit depth fighting infeasibility instead of searching it, with
-no guarantee against landing on an infeasible answer anyway. A
-problem-specific mixer that moves *only* between feasible states removes
-that burden structurally — exactly the kind of change that could unlock
-more of QAOA's actual power. The catch: such mixers are notoriously hard
-to build *efficiently*, and this repo is about doing that for one
-concrete, practically important constraint class.
+Quantum optimization has a feasibility problem. On constrained problems,
+QAOA's difficulty usually isn't the objective — it's that most of the
+states the algorithm explores aren't even allowed. The usual fix,
+penalty terms, spends precious circuit depth punishing infeasible states
+instead of searching among feasible ones, and still can't promise the
+answer it returns is valid.
 
-Can a QAOA mixer that never wastes search on infeasible configurations —
-no penalty terms, no loops, just valid moves — scale to real electrical
-grids, cheaply enough for both fault-tolerant and near-term (NISQ)
-quantum hardware?
+The cleaner idea is a **mixer that only ever moves between feasible
+states**, so infeasibility never enters the search at all. The
+difficulty is building one cheaply enough to run.
 
-**Yes — with the right techniques.** Built directly, the mixer works
-cleanly on synthetic feeders but fails outright on real, published
-topology. Two fixes close that gap: **zone decomposition** (splits the
-problem into small, exactly-solvable pieces) and a **cost-aware
-bounded-witness mixer** (bounds circuit cost directly, at a small,
-measured leakage price). Together they give both a fault-tolerant-ready
-exact construction and a NISQ-ready cheap one — validated directly on
-two real networks, not just synthetic proxies (see "Results" below).
+This repo does that for one real, practically important constraint:
+keeping an electrical distribution network **radial** — every customer
+connected, no loops — as switches open and close. And it asks two
+questions about it, in order:
 
-## Setup: the constraint, the moves, and why some ties cost more than others
+1. **Can the mixer be made cheap enough for real hardware?** Yes — at
+   two tiers, one for fault-tolerant machines and one that fits today's
+   noisy devices, validated on real published grids.
+2. **Is this problem actually hard enough to need quantum?** For real
+   grids, honestly, no — a classical solver walks them. But there is a
+   provably hard instance of the *same* problem, and this repo builds
+   it, measures a real solver giving up on it, and shows the circuit
+   for it is small.
 
-A distribution feeder has more switchable connections than it strictly
-needs: a normally-closed backbone plus a small number of normally-open
-**tie** switches, closed only temporarily (e.g. to reroute power around
-a fault). The network must stay **radial** — every node reached, no
-loops — at all times.
+The second question is the one most quantum-optimization work skips.
+Here it changes the shape of the answer, so it gets its own section.
 
-Qubit `i` = 1 iff switch `i` is closed; a configuration is feasible iff
-its closed-switch set is a spanning tree of the network graph — a basis
-of the network's graphic matroid.
+## The problem, and the move that keeps it feasible
+
+A distribution feeder has more switches than it strictly needs: a
+normally-closed backbone, plus a handful of normally-open **tie**
+switches, closed only to reroute power around a fault. Whatever the
+switches do, the network must stay radial.
+
+Each switch is a qubit (1 = closed). A configuration is feasible when
+the closed switches form a **spanning tree** — every node reached, no
+loops.
 
 ![A feasible configuration (spanning tree) vs. an infeasible one (a loop)](results/illustration_feeder_problem.png)
 
-A mixer moves probability between feasible states only, via **basis
-exchanges** — close one switch, open another, land on a different tree.
-Matroid theory guarantees exchanges like this reach any feasible
-configuration from any other, so the whole mixer is built from one small
-circuit term per exchange.
+The mixer's move is a **basis exchange**: close one switch, open
+another, and land on a different tree. Matroid theory guarantees a
+chain of such moves can reach any feasible configuration from any other
+— so the whole mixer is just one small circuit term per possible
+exchange.
 
 ![One basis-exchange move: before, the move itself, and after](results/illustration_basis_exchange_move.png)
 
-The catch: which switch has to open depends on the rest of the *current*
-configuration, so each term generally must be **conditioned** on other
-qubits — specifically, on the tie switch's **fundamental cycle** (the
-other tree edges on the loop it would create). A short cycle means a
-small, cheap condition; a long one means an expensive, deeply-controlled
-gate. Real tie switches are deliberately placed to link *distant* parts
-of a network for redundancy — the hard case, not the easy one.
+**Here is the catch.** *Which* switch has to open depends on the rest
+of the current configuration. So each exchange term must be conditioned
+on other qubits — specifically, on the loop the closing switch would
+create, its **fundamental cycle**. A tie's *range* is how far apart its
+two ends sit on the backbone, and that is exactly the length of this
+loop. A **short-range** tie closes a small loop and needs a cheap
+condition. A **long-range** tie closes a loop that winds across much of
+the network, and needs a gate controlled on many qubits — expensive.
 
 ![A tie edge's fundamental cycle, short vs long](results/illustration_fundamental_cycle.png)
 
-When a term's conditioning set (its **witness**) is deliberately capped
-smaller than the full cycle (technique 2, below), it becomes only
-approximately correct — it can fire on states where it shouldn't.
-**Leakage** is the resulting probability that ends up infeasible; **mean
-feasible mass**, measured empirically per trajectory (`leakage_trace.py`
-— exact for small instances, Wilson's-algorithm-sampled at scale), is the
-complement — 1.0 means nothing leaked.
+Real tie switches are long-range on purpose: they exist to reroute
+power around a fault, so they deliberately link *distant* parts of a
+feeder. Measured on published topologies, real ties span 33–45% of the
+network's diameter. Real topology is the expensive case, and everything
+in the next section is about paying that cost down.
 
-**The actual question this repo measures**: how much does conditioning
-cost, in gates and depth, and does that cost grow or stay bounded as the
-network gets larger and tie placement gets more realistic?
+## Two ways to make it cheap
 
-## Results: fault-tolerant now, NISQ-ready with decomposition
+**Tier 1 — whole graph, for fault-tolerant hardware.** Build the mixer
+on the entire network, but cap how many qubits any single term may
+condition on. Where the cap bites, the term becomes slightly imprecise:
+a small, *measured* fraction of probability can leak into infeasible
+states. The search that chooses each term's condition has to weigh
+circuit cost against that leakage explicitly — letting it minimize
+leakage alone drives cost up by orders of magnitude. Done right, this
+gives a complete, fully connected mixer at a cost fault-tolerant
+hardware can absorb.
 
-Techniques 1-2 (exact, or cost-aware bounded-witness, applied whole-graph,
-no decomposition) already form a complete, valid construction at whatever
-cost the search finds — fine for fault-tolerant hardware, which doesn't
-care about cost the way NISQ does. Technique 3 (zone decomposition,
-refined to guarantee its own cost) exists on top of that, to make the
-same construction cheap enough to matter on NISQ hardware today, against
-the feasibility arithmetic below (`fidelity ≈ (1-p)^N_CX`, published
-two-qubit gate error rates):
-
-| CX count | best-case trapped-ion (p=0.001) | typical superconducting (p=0.005) |
-|---|---|---|
-| 100 | 90% | 61% |
-| 500 | 61% | 8% |
-| 1,000 | 37% | 0.7% |
-| 5,000 | 0.7% | ~0 |
-| 13,000 | ~10⁻⁶ | ~0 |
-
-### On synthetic data, the two tiers split cleanly
-
-Technique 2 is stress-tested across tie placement (short vs. long-range —
-real ties span 33-45% of network diameter, matching the long-range
-generator) and tie-count growth (log-scaled, `k_ties(n) ≈ 1.43 ln n` —
-real and benchmark networks show the ties-per-bus ratio dropping 6x from
-15 to 179 buses, consistent with log growth — `docs/scaling-ladder-and-decomposition.md`
-§9). Across that ladder it plateaus by `n_nodes=60` and stays fully
-connected throughout — for short-range ties it peaks at `n_nodes=30`
-first, a real, reproducible effect (7.9% seed-to-seed variance, not
-noise, traced in §2) — but, per the table above, well past a comfortable
-NISQ regime at these sizes either way.
-
-Technique 3 fixes that without exception on this data — at every size
-≥ 30 nodes, every seed, both conditions, zone decomposition (3a) alone
-already costs less than the whole-graph construction (4.2x-41.5x
-cheaper), and its cost-capped refinement (3b) guarantees the rest of the
-way: every seed, every condition, every size tested, lands under 500 CX
-(§6-8):
-
-![Synthetic ladder: whole-graph -> zone decomposition -> cost-capped refinement](results/construction_progression_plot.png)
-
-*(Technique 1, the exact construction, is deliberately absent here and
-below — its failure mode is dropping candidates outright rather than
-getting gradually more expensive, which makes it look artificially cheap
-on cost and artificially perfect on safety, e.g. 75 CX, fully
-disconnected, 43% of candidates dropped, at `long_log, n_nodes=30`.
-Direct check: `docs/scaling-ladder-and-decomposition.md`.)*
-
-![Synthetic ladder: the same three stages, measured for safety instead of cost](results/synthetic_mass_progression_plot.png)
-
-Technique 2 alone leaks real, sometimes substantial probability (down to
-91% mean feasible mass on the hardest long-range condition); 3a tightens
-that considerably; 3b is indistinguishable from perfect (1.0 mean
-feasible mass) at every size, on both conditions — cheaper AND safer than
-either stage before it, not a tradeoff between the two.
-
-At the hardest size tested (`n_nodes=150`), directly against the
-feasibility numbers above:
-
-| condition | construction | CX | reading |
-|---|---|---|---|
-| short-range, log growth | whole-graph | 2,745 | borderline on trapped-ion; not usable on superconducting |
-| short-range, log growth | cost-capped | **73** | comfortably NISQ-ready |
-| long-range, log growth | whole-graph | 10,712 | not usable on either device |
-| long-range, log growth | cost-capped | **337** | comfortably NISQ-ready |
-
-![Where the synthetic ladder lands relative to NISQ feasibility](results/synthetic_nisq_feasibility_plot.png)
-
-### On real data, the same clean story holds
-
-![Real networks: exact vs. zone decomposition vs. cost-capped refinement](results/real_network_comparison_plot.png)
-
-| network | construction | CX | reading |
-|---|---|---|---|
-| CIGRE MV (15 buses, 3 ties) | exact whole-graph | 12,220 | fault-tolerant-ready; far outside NISQ range |
-| CIGRE MV | zone decomposition | 6,771 (3,668-9,178) | cheaper on average, but unreliable — and still outside a comfortable NISQ regime even at its best |
-| CIGRE MV | cost-capped refinement | **64** | comfortably NISQ-ready, perfectly safe, identical every seed |
-| IEEE33 (33 buses, 5 ties) | exact whole-graph | 96 | 573/597 candidates dropped, disconnected — not usable at any cost |
-| IEEE33 | zone decomposition | 132 | already comfortably NISQ-ready, identical every seed |
-| IEEE33 | cost-capped refinement | **132** | matches zone decomposition exactly — nothing left on the table |
-
-Same pattern as synthetic data, on both networks, no exceptions — but
-CIGRE MV's zone-decomposition step is a genuinely unreliable number, not
-just a point estimate: it ranges 3,668-9,178 CX across 5 tested seeds,
-over 2x spread, from randomness in the witness search's restart order,
-not the (fully deterministic) tree enumeration. Cost-capped's refinement
-is immune to this on both networks — identical across every seed tested —
-which is itself a reason to prefer it beyond just the mean cost: it's not
-just cheaper, it's predictable. Both real networks land comfortably in
-NISQ range this way.
-
-![Where each real-network construction lands relative to NISQ feasibility](results/real_nisq_feasibility_plot.png)
-
-**On scale beyond these two networks**: CIGRE MV and IEEE33 (15 and 33
-buses) are the only published radial test feeders this repo runs the
-*full circuit construction* on — such data is scarce at this scope. The
-scaling **trend**, though, isn't resting on those two points alone: it's
-established on the synthetic ladder up to `n_nodes=150` above, whose
-parameters are calibrated against real topology statistics spanning 15
-to 179 buses (`docs/scaling-ladder-and-decomposition.md` §9). That
-179-bus network hasn't had the full construction run on it directly yet
-— the natural next real-data point, not a gap in the claim itself.
-
-**Full account**: `docs/scaling-ladder-and-decomposition.md`.
-`docs/bounded-witness-mixer.md` covers the density-failure axis, the
-bounded-witness construction itself, and the cost-aware search in full
-detail.
-
-## How it works: three techniques
-
-**1. Exact matroid mixer** (`mixer.py`, `build_matroid_mixer`). For each
-candidate exchange, brute-force search for the smallest witness that
-makes the term's firing rule exactly correct — no leakage, verified
-against the true validity function. Cheap and exact when witnesses stay
-small, which needs both short-range ties and low tie density; when
-either fails, the construction doesn't get gradually more expensive — it
-drops candidates outright (51-95% in the failure cases tested) and the
-resulting mixer stops being fully connected. Full derivation and
-failure-mode trace: `docs/circuit-validity.md`, `docs/mixer-construction.md`,
-`docs/bounded-witness-mixer.md` Finding 1.
-
-**2. Bounded-witness mixer** (`truncated_mixer.py`) — bounds *cost*
-directly, at a measured, small leakage cost. When no small exact witness
-exists, don't drop the candidate: search for a witness of a fixed, capped
-size instead, using a **majority-vote** validity rule, and accept the
-resulting leakage — provided it's measured, not assumed, and stays small.
-
-![Bounded-witness mixer concept: capping witness size trades cost for a measured, non-zero leakage rate](results/illustration_bounded_witness.png)
-
-*(concept diagram, not a measurement)* capping to 1 of 3 witness qubits
-and taking a majority vote gets one group right unanimously but leaks on
-the other — a wider witness reduces leakage like this but costs more
-circuit, which is why this technique cannot be used without its other
-half: **making the search cost-aware (`cost_alpha`) is not optional**.
-Picking witnesses by leakage alone gives an uncontrolled search every
-incentive to walk to the cap every time — measured at 17,386–32,520 CX at
-just 15-17 qubits, more than a real 37-qubit decomposed feeder circuit.
-`cost_alpha` closes most of that gap and is this construction's validated
-default (`docs/bounded-witness-mixer.md`).
-
-**3a. Zone decomposition** (`zone_decomposition.py`) — fixes the *range*
-failure structurally and exactly. Partition into zones via a min
-tie-line-cut, solve each zone's matroid mixer independently, plus one
-small assembly mixer over the contracted zone graph. Guaranteed **exact**
-by graphic-matroid contraction/deletion — a structural fix to the
-*constraint*, not an approximation. When the assembly graph is itself
-still large or dense, the same idea applies one level up.
+**Tier 2 — zones, for today's hardware.** Cut the network into small
+zones along its tie lines, build a cheap exact mixer for each zone, and
+stitch them together with one small mixer over the contracted "zone
+graph." The mathematics of spanning trees makes this decomposition
+**exact** — nothing leaks. Then enforce a cost budget directly:
+transpile each piece, check its real gate count, and split or retune
+any piece that comes in over the line.
 
 ![A graph partitioned into zones, plus the contracted assembly problem](results/illustration_decomposition.png)
 
-**3b. Cost-capped refinement** — picking a zone size up front only gets
-you *a* cost, not a *controlled* one: decomposed cost has much higher
-seed-to-seed variance than whole-graph cost (coefficient of variation up
-to 99% at some sizes — a single "unlucky" zone can dominate a seed's
-total). The fix is the same discipline as technique 2's: build each
-subproblem, transpile it, and check its **actual** cost against a
-threshold; sweep `cost_alpha` for the cheapest passing result if it's
-already under, or try more than one zone-size granularity and recurse on
-whichever gives the cheaper total if it's over.
+*(A third, simpler construction — exact conditioning with no cap — is
+the baseline both tiers grow from. It is not a tier: when no small
+exact condition exists it silently drops the exchange, and on real
+topology that leaves the mixer disconnected. `docs/circuit-validity.md`
+traces that failure.)*
 
-![Cost-capped decomposition: measure actual cost, recurse only where it's over threshold](results/illustration_cost_capped_decomposition.png)
+## Results
 
-## What this does and doesn't demonstrate
+Where the tiers land is judged against a simple yardstick. With
+published two-qubit error rates, a circuit's chance of running cleanly
+is roughly `(1 − p)^N_CX`; 500 two-qubit gates is about where today's
+hardware stops being viable:
 
-This repo shows the mixer **construction** is correct and scales — both
-exactly (fault-tolerant-relevant) and, via decomposition and cost-capping,
-cheaply enough for a plausible NISQ target (real-topology-relevant). For
-the main radiality-constraint scaling story above, it does **not** show a
-quantum algorithm outperforming a classical baseline: no cost-Hamiltonian/
-oracle integration, no QAOA execution, no classical solver comparison,
-and no test of the iterative boundary coupling (an ADMM-style loop) this
-kind of decomposition would need for the actual optimization objective —
-only the radiality constraint, tested here, decomposes exactly. Classical
-formulations of the same constraint still need explicit penalty terms or
-solver-enforced constraints; this mixer builds feasibility into the
-dynamics directly — that's the promise a bounded-cost result is a
-*precondition* for, not proof of. See `methodology.md` for the precise
-boundary of what was measured.
+| CX gates | trapped-ion (p=0.001) | superconducting (p=0.005) |
+|---|---|---|
+| 100 | 90% | 61% |
+| 500 | 61% | 8% |
+| 5,000 | 0.7% | ~0 |
 
-A separate, narrower case study *does* include all three of those pieces
-— see below.
+**Why two kinds of experiment.** Published feeder topologies are scarce
+— this repo has two, at 15 and 33 buses. They can show the tiers work
+on real structure, but not whether they *keep* working as networks
+grow toward realistic sizes. A synthetic ladder can grow, but it only
+means something if it is built to resemble real feeders in the ways
+that actually drive cost. So the ladder answers *does it scale?*, the
+real feeders answer *does it transfer?*, and each is convincing only
+because of the other.
 
-## A provably hard instance, with a real classical/quantum comparison
+**The synthetic ladder** runs from 10 to 150 nodes, matched to real
+feeders in the two ways that matter: every tie is long-range, and the
+number of ties grows only logarithmically with network size. That
+second fact is measured, not assumed — across real and benchmark
+feeders from 15 to 179 buses, the ratio of ties to buses falls about
+6×, which is what logarithmic growth looks like. Larger real grids
+don't get proportionally more redundancy, just a little more.
 
-The scaling story above says nothing about whether any *particular*
-instance is hard for a classical solver — and this repo's own mixer
-construction (enumerate the feasible set, search for exchange witnesses)
-structurally cannot even be built on an instance whose feasible set isn't
-enumerable, which is close to a definition of "classically easy." A
-separate case study asks the sharper question directly: build a
-*specific, verifiable* instance of the same problem class that is hard
-even at small size, and see whether a matching quantum circuit for it
-stays small.
+![Synthetic feeders with real-topology tie statistics: the two tiers](results/construction_progression_plot.png)
 
-Using a real, published NP-hardness reduction (Khodabakhsh et al.,
-arXiv:1711.03517, 3-PARTITION → radial reconfiguration), measured
-directly rather than assumed:
+At the largest size (150 nodes), Tier 1 costs 10,712 CX and Tier 2
+costs **337 CX**. Cost alone isn't the whole question, though: Tier 1
+buys its cost by capping conditions, so it has to be asked how much
+exactness the cap gave up. The answer is leakage of up to 9%. Tier 2,
+asked the same question, gave up nothing — it never leaks, at any size.
+Cheaper *and* exact, not a tradeoff.
 
-- **Classical hardness, measured**: CP-SAT proof time grows from 1.3s to
-  a 30-minute unproved timeout as the instance grows from 65 to 177
-  nodes — small graphs, real solver failure.
-- **A small matching circuit, derived from the proof itself**: the same
-  hardness proof reveals almost all of the instance's structure is
-  forced, leaving only a partition-matroid-shaped core — needing a
-  simpler, witness-free mixer than this repo's general one, verified
-  exactly via full-unitary checks, and only 48 qubits / ~800 two-qubit
-  gates at the size where classical proof already takes several seconds.
-- **Both a real solver and a real tensor-network (MPS) simulator
-  checked**: MPS doesn't offer a reliable shortcut either — it misses
-  the exact answer by ~8% even at bond dimension 64 on the smallest
-  checkable size, and its wall-clock cost grows ~70x over a size range
-  where the qubit count only grows ~6x.
-- **Honestly scoped**: this is evidence supporting, not proof of, a
-  quantum advantage — solution quality at the actual hard sizes remains
-  genuinely unmeasured, because both natural classical ways to check it
-  (exact simulation, MPS) hit real walls first.
+**The real feeders** are the transfer test: topology nobody designed to
+be convenient. Both tiers were built on the CIGRE MV benchmark (15
+buses, 3 ties) and the IEEE 33-bus feeder (33 buses, 5 ties), five
+random seeds each:
 
-Full account, all three findings above with complete tables and the
-exact reasoning behind each: `docs/hard-instance-case-study.md`. Raw
-data: `results/hard_instance_hardness_sweep.csv`,
-`results/mps_scaling_check.csv`.
+![Real networks: the two deployment tiers](results/real_network_comparison_plot.png)
+
+![Where each real network's two tiers land relative to NISQ feasibility](results/real_nisq_feasibility_plot.png)
+
+Tier 2 lands comfortably inside today's hardware budget on both
+networks, and its number is identical across every seed — predictable,
+not just cheap. Tier 1 stays complete and fully connected on both, at a
+cost only fault-tolerant hardware could absorb.
+
+The full account — including the intermediate constructions, the
+short-range control condition, and the safety measurements not shown
+here — is in `docs/scaling-ladder-and-decomposition.md` and
+`docs/bounded-witness-mixer.md`.
+
+## The second question: does it matter?
+
+So the mixer runs, cheaply, on real grids. The obvious next question is
+whether a quantum computer was ever needed. For the real grids above —
+no. A feeder has only a handful of tie switches, so its set of feasible
+configurations is small, and a classical solver simply enumerates it.
+In fact the constructions above *rely* on that: they need to enumerate
+the feasible set to build their conditioning terms.
+
+The cheapest way to make a real grid harder would be to keep its
+topology and make the objective nastier. That was tried first, on the
+IEEE 33-bus feeder, with a random quadratic cost and then with a
+physically motivated congestion cost. Both were solved to proven
+optimality in under a third of a second: with so few feasible
+configurations, the objective barely matters.
+
+Hardness, then, has to come from the combinatorics, not the topology.
+So this repo takes a published NP-hardness proof for exactly this
+problem — radial reconfiguration under a loss-minimizing objective
+(Khodabakhsh et al., arXiv:1711.03517) — and builds the hard instance
+it describes. Three things were measured, not assumed, each answering a
+different objection:
+
+- **"A classical solver would just handle it."** The honest measure of
+  classical hardness is not how fast a solver *finds* a good tree —
+  heuristics do that quickly on almost anything — but how fast it can
+  *prove* the tree is optimal. CP-SAT's proof time grows from a few
+  seconds on a 65-node instance to a 30-minute timeout, proof
+  unfinished, at 177 nodes. Every point is cross-checked against an
+  independent exact calculation.
+- **"Then the quantum circuit must be enormous."** Tier 1 and Tier 2
+  can't even be started on this instance: both begin by enumerating the
+  feasible set, and here that set is astronomically large — which is
+  precisely *why* the instance is hard. The way in is the hardness
+  proof itself. It reveals that almost every edge of the instance is
+  forced, and the few free choices are independent of one another.
+  Independent choices need no conditioning, so the mixer needs no
+  witness search at all — and 48 qubits with about 800 two-qubit gates
+  cover the size where the classical solver already takes seconds.
+- **"A classical computer could just simulate that circuit."** A small
+  circuit only matters if it can't be shortcut classically, and
+  tensor-network (MPS) methods are the strongest classical tool for
+  circuits like this one. MPS misses the exact answer by about 8% on
+  the smallest instance it can be checked against, and its cost grows
+  roughly 70× over a range where the qubit count grows only 6×.
+
+This is what makes the two halves of the repo fit together rather than
+compete. Real grids are *structurally* hard to stay feasible on — long
+loops, expensive conditions — but *combinatorially* easy to solve. The
+hard instance is the mirror image: structurally trivial, combinatorially
+brutal. Each construction handles the axis its problem actually has.
+Whether an instance exists that is hard on both axes at once is an open
+question this repo does not answer.
+
+Full account: `docs/hard-instance-case-study.md`.
+
+## What is and isn't shown
+
+The construction work shows the mixer is correct and cheap enough for
+both hardware tiers. It does not show a quantum algorithm beating a
+classical one: there is no objective, no QAOA run, and no test of the
+boundary-coupling loop a real decomposed optimization would need.
+
+The hard-instance study adds an objective, a real solver comparison,
+and a simulation comparison — but on a purpose-built instance, and it
+stops short of demonstrating advantage. Solution quality at the
+genuinely hard sizes is unmeasured, because both classical ways of
+checking it hit walls first. The case study says so, with numbers.
+
+`methodology.md` has the precise measurement boundary.
 
 ## How to reproduce
-
-Three steps cover everything this README claims:
 
 ```
 python -m venv .venv
 source .venv/bin/activate   # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
+```
 
+**Question 1 — the mixer:**
+
+```
 python scripts/verify_correctness.py && python scripts/verify_leakage_trace.py
-# correctness: the exact construction is exactly leak-free and fully
-# connected wherever it applies; the bounded-witness construction's
-# leakage tooling (sparse tracer, Wilson's-algorithm sampling) is verified
-# against an exact reference.
+# the exact construction is leak-free where it applies; the Tier 1
+# leakage tooling is verified against an exact reference.
 
 python scripts/run_real_networks_hierarchical.py
-# the real-network numbers the Results section reports: exact vs.
-# decomposed vs. cost-capped, both CIGRE MV and IEEE33.
+# the real-network figures above: both tiers, both networks, 5 seeds each.
 
 python scripts/plot_results_figures.py && python scripts/plot_illustrations.py
-# every figure in this README, regenerated from already-committed data.
+# every figure in this README, from already-committed data.
+```
+
+**Question 2 — the hard instance:**
+
+```
+python scripts/verify_partition_mixer.py
+# exact-unitary proof that the case study's mixer preserves feasibility,
+# plus an exact check of its cost Hamiltonian against the true objective.
+
+python scripts/measure_partition_mixer.py
+# transpiled gate counts and depth for the 48-qubit hard instance.
+
+python scripts/run_hardness_sweep.py       # CP-SAT hardness curve (slow: hours)
+python scripts/run_mps_scaling_check.py    # the MPS comparison (~15 min)
 ```
 
 All scripts are deterministic (fixed seeds); re-running reproduces the
-committed `results/` files exactly, modulo `qiskit`/`networkx` version
-differences. This reproduces what's *shown* here — the fuller
-escalating-ladder, density-axis, and hierarchical-decomposition
-investigations use the additional scripts indexed in
+committed `results/` files, modulo solver and library version
+differences. Further investigations use the scripts indexed in
 `docs/repository-map.md`.
 
 ## Scope
 
-Measurement methodology and results for the question above only — not a
-production mixer-compilation library, and not extended to constraint
-classes other than graphic-matroid radiality (`methodology.md` has the
-precise boundary).
+Measurement methodology and results for the two questions above only —
+not a production mixer-compilation library. Question 1 covers the
+radiality constraint; question 2's circuit covers the simpler structure
+its hardness proof reduces to. Nothing broader is claimed for either.
 
 ## Repository layout
 
 - `methodology.md` — graph generation, move generation, and exactly what
   "gate count" and "depth" mean.
-- `docs/mixer-construction.md` — technical reference: matroid theory,
-  exact circuit derivation, correctness-verification arguments.
-- `docs/circuit-validity.md` — the real-topology failure, its root cause,
-  the decomposition fix, and its scaling validation.
-- `docs/bounded-witness-mixer.md` — the density-driven witness-blowup
-  axis, the bounded-witness mixer, and the circuit-cost investigation
-  behind `cost_alpha`.
-- `docs/scaling-ladder-and-decomposition.md` — the escalating realism
-  ladder, NISQ feasibility, hierarchical and cost-capped decomposition,
-  and direct validation on two real networks. The fullest, most detailed
-  account in this repo — everything summarized in this README's Results
-  section traces back to a section here.
-- `docs/hard-instance-case-study.md` — the provably hard instance, its
-  measured classical (CP-SAT) and classical-simulation (MPS) hardness,
-  and the small matching QAOA circuit derived from the hardness proof
-  itself.
+- `docs/mixer-construction.md` — matroid theory, exact circuit
+  derivation, correctness arguments.
+- `docs/circuit-validity.md` — why the exact construction fails on real
+  topology, and the decomposition fix.
+- `docs/bounded-witness-mixer.md` — Tier 1 in full: the witness cap,
+  the leakage measurement, and the cost-aware search.
+- `docs/scaling-ladder-and-decomposition.md` — the synthetic ladder,
+  Tier 2 in full, safety measurements, and the real-network validation.
+  Everything in Results traces back to it.
+- `docs/hard-instance-case-study.md` — question 2 in full: the
+  instance, the solver curve, the small circuit, and the MPS check.
 - `scripts/` and `results/` — one script per measurement, one CSV/plot
-  pair per script, all generated, none hand-edited. Full script-by-script
-  index: `docs/repository-map.md`.
+  pair per script, all generated, none hand-edited. Full index:
+  `docs/repository-map.md`.
 
 ## License
 

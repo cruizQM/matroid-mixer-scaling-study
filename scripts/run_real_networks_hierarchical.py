@@ -28,12 +28,22 @@ transmission dataset (real_feeders.py's own docstring).
 
 ## Method
 
-For each real network: the EXACT construction (`build_matroid_mixer`,
-full enumeration -- both networks are small enough, and fully
-deterministic -- no seed dependence, so measured once), AND the
-hierarchical, density-aware decomposition + cost-aware bounded-witness
-mixer (this branch's current-best construction). Both measured with the
-same transpilation/safety methodology as the rest of this investigation.
+For each real network, four constructions, all under the same
+transpilation/safety methodology:
+
+- `exact_whole_graph` -- `build_matroid_mixer`, full enumeration.
+  Deterministic, so measured once. Kept as the theoretical baseline; not
+  deployable in its own right (it drops candidates rather than getting
+  expensive -- see `docs/circuit-validity.md`).
+- `truncated_whole_graph` -- technique 2 on the whole graph, no
+  decomposition. This is the README's **fault-tolerant tier**, and the
+  real-network counterpart of the synthetic ladder's
+  `fixed_alpha_ladder_summary.csv`. Added after the fact: the README
+  needed a real-network number for this tier and the only whole-graph
+  measurement here was the exact construction, which is a different
+  technique with a different failure mode.
+- `decomposed` -- flat zone decomposition, the intermediate step.
+- `cost_capped` -- the README's **NISQ tier**.
 
 ## Why `decomposed` and `cost_capped` are averaged over multiple seeds
 (and `exact` isn't)
@@ -80,8 +90,14 @@ from mixer import build_matroid_mixer, mixer_circuit, verify_all_terms_no_leakag
 from leakage_trace import final_feasible_mass
 from random_trees import random_spanning_tree
 from real_feeders import load_cigre_mv, load_ieee33
-from run_decomposed_cost_aware_ladder import measure_subproblem
+from run_decomposed_cost_aware_ladder import (
+    EXACT_SEARCH_MAX_SIZE,
+    GAIN_PRICE,
+    MAX_WITNESS_SIZE,
+    measure_subproblem,
+)
 from run_cost_capped_decomposition import decompose_to_threshold, CX_THRESHOLD
+from truncated_mixer import build_truncated_witness_mixer
 from zone_decomposition import build_assembly_graph, build_zone_subgraph, partition_zones_by_size
 
 RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
@@ -113,6 +129,57 @@ def measure_exact(graph) -> dict:
         "depth": tqc.depth(),
         "unsafe_rate": 0.0,
         "mean_feasible_mass": 1.0,
+    }
+
+
+def measure_truncated_whole_graph(graph, seed: int = 0) -> dict:
+    """Technique 2 applied to the WHOLE graph, no decomposition -- the
+    fault-tolerant tier's real-network number, and the direct counterpart
+    of the synthetic ladder's `fixed_alpha_ladder_summary.csv`.
+
+    Enumerates the true spanning-tree set rather than routing through
+    `measure_subproblem`'s sampling fallback: that helper switches to a
+    walked sample above `comb(n_edges, n_nodes-1) > 200_000`, and IEEE33
+    sits just past it at 435,897 -- but enumeration is demonstrably
+    affordable on this exact graph (`measure_exact` above already does
+    it), and the helper's own docstring notes the walked sample is a
+    partial, connected-component-limited view that gives the
+    majority-vote witness search strictly less to work with. Using the
+    true tree set keeps this tier's headline number free of a sampling
+    caveat the data doesn't actually require.
+
+    Search parameters are this construction's validated defaults, taken
+    from `run_decomposed_cost_aware_ladder` rather than re-declared here,
+    so the two tiers cannot silently drift apart."""
+    trees = enumerate_spanning_trees(graph)
+    truncated = build_truncated_witness_mixer(
+        graph, trees, max_witness_size=MAX_WITNESS_SIZE,
+        exact_search_max_size=EXACT_SEARCH_MAX_SIZE, seed=seed,
+        adaptive=False, cost_alpha=GAIN_PRICE,
+    )
+    construction = truncated.construction
+    qc = mixer_circuit(construction, beta=BETA)
+    tqc = transpile(qc, basis_gates=TRANSPILE_BASIS, optimization_level=1)
+    op_counts = tqc.count_ops()
+
+    rng = np.random.default_rng(seed)
+    masses = [
+        final_feasible_mass(graph, construction, random_spanning_tree(graph, rng), BETA, sparse=True)
+        for _ in range(min(N_STARTING_TREES, len(trees)))
+    ]
+    unsafe = sum(1 for m in masses if m < 1.0 - UNSAFE_TOL)
+    return {
+        "method": "truncated_whole_graph",
+        "seed": seed,
+        "n_terms": len(construction.terms),
+        "max_witness_size": max((t.control_count for t in construction.terms), default=0),
+        "dropped_candidates": construction.dropped_candidates,
+        "fully_connected": construction.fully_connected,
+        "leak_free_verified": None,
+        "cx_count": op_counts.get("cx", 0),
+        "depth": tqc.depth(),
+        "unsafe_rate": round(unsafe / len(masses), 4) if masses else 0.0,
+        "mean_feasible_mass": round(float(np.mean(masses)), 4) if masses else 1.0,
     }
 
 
@@ -218,6 +285,12 @@ def run(name: str, graph, run_exact: bool = True) -> list:
         # no seed dependence to average over.
         print("  exact: SKIPPED -- already measured in results/real_feeder_results.csv "
               "(24 terms, 573/597 candidates dropped, fully_connected=False)", flush=True)
+
+    for seed in range(SEEDS_PER_NETWORK):
+        trunc = measure_truncated_whole_graph(graph, seed=seed)
+        trunc["network"] = name
+        rows.append(trunc)
+        print(f"  truncated_whole_graph seed={seed}: {trunc}", flush=True)
 
     for seed in range(SEEDS_PER_NETWORK):
         decomp = measure_decomposed(graph, seed=seed)
