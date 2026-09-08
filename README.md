@@ -153,9 +153,7 @@ be convenient. Both tiers were built on the CIGRE MV benchmark (15
 buses, 3 ties) and the IEEE 33-bus feeder (33 buses, 5 ties), five
 random seeds each:
 
-![Real networks: the two deployment tiers](results/real_network_comparison_plot.png)
-
-![Where each real network's two tiers land relative to NISQ feasibility](results/real_nisq_feasibility_plot.png)
+![Real networks: the two deployment tiers — circuit cost per tier, and where those costs land on today's hardware](results/real_networks_plot.png)
 
 Tier 2 lands comfortably inside today's hardware budget on both
 networks — 64 CX at depth 147 on 17 qubits, 132 CX at depth 272 on 37

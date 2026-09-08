@@ -170,9 +170,10 @@ past a floor size.
 
 A fair question about section 2's own figures (and the README's
 `construction_progression_plot.png` / `synthetic_mass_progression_plot.png`,
-which reuse this same data — the README embeds only the cost plot, and
-only its long-range condition; the short-range control and the safety
-companion are generated but live here): they compare the
+which reuse this same data — both drawn for the long-range condition
+only; the README embeds the cost plot, the safety companion lives here,
+and the short-range control condition is reported in this document's
+tables rather than drawn): they compare the
 cost-aware bounded-witness mixer against its cost-capped decomposed
 variant (those two being the repo's two deployment tiers — both figures
 were narrowed to just those, dropping the intermediate

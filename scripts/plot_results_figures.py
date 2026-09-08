@@ -14,28 +14,25 @@ artificially cheap on a cost axis and artificially perfect on a safety
 axis. Plotting either invites a comparison between things that aren't
 alternatives.
 
+Every synthetic figure shows the long-range-tie condition only: real
+ties are long-range by design, and the short-range condition is a
+synthetic control reported in the docs' tables, not drawn.
+
 1. `construction_progression_plot.png` -- synthetic ladder, CX vs. size,
-   both tiers, against the 500-CX target line. Long-range-tie condition
-   only (the one that models real feeders; the short-range control stays
-   in the docs and in figure 2).
+   both tiers, against the 500-CX target line. In the README.
 2. `synthetic_mass_progression_plot.png` -- same ladder, same two tiers,
-   mean feasible mass (safety) instead of CX.
-3. `synthetic_nisq_feasibility_plot.png` -- both tiers at the ladder's
-   hardest tested size (n_nodes=150), against published NISQ fidelity
-   curves.
-4. `real_network_comparison_plot.png` -- grouped bar chart, both tiers,
-   both real networks, against the 500-CX target line.
-5. `real_nisq_feasibility_plot.png` -- both tiers on both real networks,
-   against the same fidelity curves.
+   mean feasible mass (safety) instead of CX. Docs only.
+3. `real_networks_plot.png` -- both real networks, two panels: CX per
+   tier with min-max bars, and the same numbers on published NISQ
+   fidelity curves. In the README.
 
-Two more for the hard-instance case study (question 2), both in the
-README:
+For the hard-instance case study (question 2), all in the README:
 
-6. `hard_instance_proof_time_plot.png` -- CP-SAT proof time vs. gadget
+4. `hard_instance_proof_time_plot.png` -- CP-SAT proof time vs. gadget
    size, timeouts drawn as a wall.
-7. `mps_convergence_plot.png` -- MPS accuracy vs. exact where
+5. `mps_convergence_plot.png` -- MPS accuracy vs. exact where
    computable, and simulation time vs. size at fixed bond dimension.
-8. `large_b_grid_plot.png` -- the two dials (m, B) as a grid, one panel
+6. `large_b_grid_plot.png` -- the two dials (m, B) as a grid, one panel
    per classical route, DP cells carrying their state counts.
 
 (Two earlier figures were removed as redundant once the README's own
@@ -151,25 +148,26 @@ def plot_synthetic_mass_progression() -> None:
     # technique 2 = FIXED cost_alpha=0.01, this construction's validated
     # default -- NOT cost_aware_scaling_ladder_summary.csv, which
     # (per that script's own docstring) measures the ADAPTIVE variant.
+    # Long-range ties only, matching plot_construction_progression: the
+    # short-range condition is a synthetic control, not a claim about
+    # real feeders, and is reported in the docs' tables rather than drawn.
     whole = _rows("fixed_alpha_ladder_summary.csv")
     capped = _rows("cost_capped_decomposition_summary.csv")
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), sharey=True)
-    for ax, cond, title in ((axes[0], "short_log", "short-range ties, log growth"), (axes[1], "long_log", "long-range ties, log growth")):
-        xs_w, ys_w = _series(whole, "condition", cond, "n_nodes", "mean_feasible_mass_mean")
-        xs_c, ys_c = _series(capped, "condition", cond, "n_nodes", "mean_feasible_mass_mean")
-        ax.plot(xs_w, ys_w, marker="o", color="#C0392B", label="whole-graph, no decomposition — fault-tolerant tier")
-        ax.plot(xs_c, ys_c, marker="^", color="#2E8B57", label="cost-capped decomposition — NISQ tier")
-        ax.axhline(1.0, color="black", ls="dashed", lw=1, label="perfect (no leakage)")
-        ax.set_xlabel("n_nodes")
-        ax.set_title(title, fontsize=11)
-        ax.grid(True, alpha=0.3)
-        ax.set_ylim(0.85, 1.02)
-    axes[0].set_ylabel("mean feasible mass (1.0 = no leakage)")
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=9, bbox_to_anchor=(0.5, -0.08))
-    fig.suptitle("The same two tiers, measured for safety instead of cost", fontsize=12)
-    fig.tight_layout(rect=(0, 0.1, 1, 0.95))
+    fig, ax = plt.subplots(figsize=(8, 4.8))
+    xs_w, ys_w = _series(whole, "condition", "long_log", "n_nodes", "mean_feasible_mass_mean")
+    xs_c, ys_c = _series(capped, "condition", "long_log", "n_nodes", "mean_feasible_mass_mean")
+    ax.plot(xs_w, ys_w, marker="o", color="#C0392B", label="whole-graph, no decomposition — fault-tolerant tier")
+    ax.plot(xs_c, ys_c, marker="^", color="#2E8B57", label="cost-capped decomposition — NISQ tier")
+    ax.axhline(1.0, color="black", ls="dashed", lw=1, label="perfect (no leakage)")
+    ax.set_xlabel("network size (n_nodes)")
+    ax.set_ylabel("mean feasible mass (1.0 = no leakage)")
+    ax.set_title("The same two tiers, measured for safety instead of cost", fontsize=11)
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(0.85, 1.02)
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=9, bbox_to_anchor=(0.5, -0.02))
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
     out = RESULTS_DIR / "synthetic_mass_progression_plot.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -188,134 +186,76 @@ def _fidelity_axes(ax, title: str) -> None:
     ax.grid(True, alpha=0.3, which="both")
 
 
-def plot_synthetic_nisq_feasibility() -> None:
-    """Vertical reference lines, not curve-placed markers -- same reasoning
-    as the real-network version: a marker sitting ON one curve would
-    misleadingly imply that curve's fidelity even where the other curve's
-    value is what matters. Uses the ladder's hardest tested size
-    (n_nodes=150) as the representative point for each condition."""
-    # technique 2 = FIXED cost_alpha=0.01, this construction's validated
-    # default -- NOT cost_aware_scaling_ladder_summary.csv, which
-    # (per that script's own docstring) measures the ADAPTIVE variant.
-    whole = _rows("fixed_alpha_ladder_summary.csv")
-    capped = _rows("cost_capped_decomposition_summary.csv")
+def plot_real_networks() -> None:
+    """The two real networks on one figure, two panels: left, transpiled
+    CX per tier with min-max bars over SEEDS_PER_NETWORK seeds; right,
+    where those same numbers land on published NISQ fidelity curves,
+    drawn as vertical reference lines (a marker sitting ON one curve
+    would misleadingly imply that curve's fidelity where the other's
+    value is what matters). Replaces two separate figures that said the
+    same four numbers twice at full width.
 
-    def cx_at_150(rows: list[dict], condition: str) -> float:
-        return next(float(r["cx_mean"]) for r in rows if r["condition"] == condition and r["n_nodes"] == "150")
-
-    fig, ax = plt.subplots(figsize=(9, 5.5))
-    _fidelity_axes(ax, "Where the synthetic ladder lands relative to NISQ feasibility\n(hardest tested size, n_nodes=150)")
-
-    lines = [
-        ("short-range, whole-graph", cx_at_150(whole, "short_log"), "#D9822B", "dashdot"),
-        ("short-range, cost-capped", cx_at_150(capped, "short_log"), "#2E8B57", "solid"),
-        ("long-range, whole-graph", cx_at_150(whole, "long_log"), "#B0392B", "dashdot"),
-        ("long-range, cost-capped", cx_at_150(capped, "long_log"), "#66C2A5", "solid"),
-    ]
-    for label, xval, color, ls in lines:
-        ax.axvline(xval, color=color, ls=ls, lw=1.6, alpha=0.85, label=f"{label} ({int(round(xval))} CX)", zorder=2)
-
-    ax.legend(fontsize=8, loc="lower left", ncol=1)
-    fig.tight_layout()
-    out = RESULTS_DIR / "synthetic_nisq_feasibility_plot.png"
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    print(f"wrote {out}")
-
-
-def plot_real_nisq_feasibility() -> None:
-    """Uses real_networks_hierarchical_summary.csv (mean over
-    SEEDS_PER_NETWORK seeds for decomposed/cost_capped -- see that
-    script's own docstring for why averaging matters here: CIGRE MV's
-    flat-decomposed result varies 3,668-9,178 CX depending on seed, even
-    though its zones use fully deterministic exact tree enumeration
-    (the randomness is in the witness search's restart order, not the
-    tree set)."""
+    Two tiers only, matching the synthetic figures: whole-graph
+    (fault-tolerant) and cost-capped decomposition (NISQ). Zone
+    decomposition alone and the exact construction are omitted for the
+    same reason as everywhere else -- neither is a tier anyone would
+    deploy (3a is dominated by 3b; the exact construction's IEEE33 result
+    is cheap only because it is mostly incomplete, 573/597 candidates
+    dropped and disconnected). Means over 5 seeds -- CIGRE MV's
+    whole-graph tier varies 274-432 CX with seed."""
     real = _rows("real_networks_hierarchical_summary.csv")
 
-    def cx_of(network: str, method: str) -> float | None:
-        for r in real:
-            if r["network"] == network and r["method"] == method:
-                return float(r["cx_mean"])
-        return None
-
-    fig, ax = plt.subplots(figsize=(9, 5.5))
-    _fidelity_axes(ax, "Where each real network's two tiers land relative to NISQ feasibility\n(read a network's fidelity off either curve at its vertical line; mean over 5 seeds)")
-
-    # Two tiers only, matching the synthetic figures: whole-graph
-    # (fault-tolerant) and cost-capped decomposition (NISQ). Zone
-    # decomposition alone and the exact construction are both omitted for
-    # the same reason they are omitted from the synthetic plots -- neither
-    # is a tier anyone would deploy (3a is strictly dominated by 3b; the
-    # exact construction's IEEE33 result is cheap only because it is
-    # mostly incomplete, 573/597 candidates dropped and disconnected).
-    lines = [
-        ("CIGRE MV whole-graph (fault-tolerant)", cx_of("CIGRE_MV", "truncated_whole_graph"), "#C0392B", "dashdot"),
-        ("CIGRE MV cost-capped (NISQ)", cx_of("CIGRE_MV", "cost_capped"), "#2E8B57", "solid"),
-        ("IEEE33 whole-graph (fault-tolerant)", cx_of("IEEE33", "truncated_whole_graph"), "#E8746A", "dashdot"),
-        ("IEEE33 cost-capped (NISQ)", cx_of("IEEE33", "cost_capped"), "#66C2A5", "solid"),
-    ]
-    for label, xval, color, ls in lines:
-        if xval is None:
-            continue
-        ax.axvline(xval, color=color, ls=ls, lw=1.6, alpha=0.85, label=f"{label} ({int(round(xval))} CX)", zorder=2)
-
-    ax.legend(fontsize=8, loc="lower left", ncol=1)
-    fig.tight_layout()
-    out = RESULTS_DIR / "real_nisq_feasibility_plot.png"
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    print(f"wrote {out}")
-
-
-def plot_real_network_comparison() -> None:
-    """Two tiers per network, error bars = min-max across
-    SEEDS_PER_NETWORK seeds. Same two-line restriction as the synthetic
-    figures (see plot_construction_progression's docstring): zone
-    decomposition alone and the exact construction are omitted because
-    neither is a deployable tier."""
-    real = _rows("real_networks_hierarchical_summary.csv")
-
-    def stats_of(network: str, method: str) -> tuple[float, float, float] | None:
-        for r in real:
-            if r["network"] == network and r["method"] == method:
-                return float(r["cx_mean"]), float(r["cx_min"]), float(r["cx_max"])
-        return None
+    def stats_of(network: str, method: str) -> tuple[float, float, float]:
+        r = next(r for r in real if r["network"] == network and r["method"] == method)
+        return float(r["cx_mean"]), float(r["cx_min"]), float(r["cx_max"])
 
     networks = ["CIGRE_MV", "IEEE33"]
-    methods = [
-        ("truncated_whole_graph", "whole-graph, no decomposition — fault-tolerant tier", "#C0392B"),
-        ("cost_capped", "cost-capped decomposition — NISQ tier", "#2E8B57"),
+    tiers = [
+        ("truncated_whole_graph", "whole-graph, no decomposition — fault-tolerant tier", "#C0392B", "#E8746A", "dashdot"),
+        ("cost_capped", "cost-capped decomposition — NISQ tier", "#2E8B57", "#66C2A5", "solid"),
     ]
 
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, (ax_bar, ax_fid) = plt.subplots(1, 2, figsize=(13, 5), gridspec_kw={"width_ratios": [1, 1.25]})
+
+    # --- left: bars
     x = np.arange(len(networks))
     width = 0.32
-    for i, (method, label, color) in enumerate(methods):
+    for i, (method, label, color, _, _) in enumerate(tiers):
         vals, err_lo, err_hi = [], [], []
         for net in networks:
             v, mn, mx = stats_of(net, method)
             vals.append(v)
             err_lo.append(v - mn)
             err_hi.append(mx - v)
-        bars = ax.bar(x + (i - 0.5) * width, vals, width, label=label, color=color,
-                       yerr=[err_lo, err_hi], capsize=4, ecolor="black")
+        bars = ax_bar.bar(x + (i - 0.5) * width, vals, width, label=label, color=color,
+                          yerr=[err_lo, err_hi], capsize=4, ecolor="black")
         for b, v, hi in zip(bars, vals, err_hi):
-            # label above the error bar's upper cap, not on top of it
-            ax.text(b.get_x() + b.get_width() / 2, (v + hi) * 1.08, f"{int(round(v))}",
-                    ha="center", va="bottom", fontsize=8)
+            ax_bar.text(b.get_x() + b.get_width() / 2, (v + hi) * 1.08, f"{int(round(v))}",
+                        ha="center", va="bottom", fontsize=8)
+    ax_bar.axhline(CX_THRESHOLD, color="black", ls="dashed", lw=1, label=f"{CX_THRESHOLD} CX target")
+    ax_bar.set_yscale("log")
+    ax_bar.set_xticks(x)
+    ax_bar.set_xticklabels(["CIGRE MV\n(15 bus, 3 ties)", "IEEE33\n(33 bus, 5 ties)"])
+    ax_bar.set_ylabel("transpiled CX count")
+    ax_bar.set_title("Circuit cost per tier (mean over 5 seeds, bars = min–max)", fontsize=10.5)
+    ax_bar.grid(True, alpha=0.3, axis="y", which="both")
 
-    ax.axhline(CX_THRESHOLD, color="black", ls="dashed", lw=1, label=f"{CX_THRESHOLD} CX target")
-    ax.set_yscale("log")
-    ax.set_xticks(x)
-    ax.set_xticklabels(["CIGRE MV (15 bus, 3 ties)", "IEEE33 (33 bus, 5 ties)"])
-    ax.set_ylabel("transpiled CX count")
-    ax.set_title("Real networks: the two deployment tiers")
-    ax.legend(fontsize=9)
-    ax.grid(True, alpha=0.3, axis="y", which="both")
-    fig.tight_layout()
-    out = RESULTS_DIR / "real_network_comparison_plot.png"
-    fig.savefig(out, dpi=150)
+    # --- right: the same numbers on the fidelity curves
+    _fidelity_axes(ax_fid, "Where those costs land on today's hardware")
+    for net, net_label in (("CIGRE_MV", "CIGRE MV"), ("IEEE33", "IEEE33")):
+        for method, _, color, light, ls in tiers:
+            v, _, _ = stats_of(net, method)
+            c = color if net == "CIGRE_MV" else light
+            tier_word = "whole-graph" if method == "truncated_whole_graph" else "cost-capped"
+            ax_fid.axvline(v, color=c, ls=ls, lw=1.6, alpha=0.85, label=f"{net_label} {tier_word} ({int(round(v))} CX)", zorder=2)
+    ax_fid.legend(fontsize=7.5, loc="lower left")
+
+    handles, labels = ax_bar.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=9, bbox_to_anchor=(0.5, -0.02))
+    fig.suptitle("Real networks: the two deployment tiers", fontsize=12)
+    fig.tight_layout(rect=(0, 0.07, 1, 0.95))
+    out = RESULTS_DIR / "real_networks_plot.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"wrote {out}")
 
@@ -514,9 +454,7 @@ def plot_large_b_grid() -> None:
 if __name__ == "__main__":
     plot_construction_progression()
     plot_synthetic_mass_progression()
-    plot_synthetic_nisq_feasibility()
-    plot_real_nisq_feasibility()
-    plot_real_network_comparison()
+    plot_real_networks()
     plot_hard_instance_proof_time()
     plot_mps_convergence()
     plot_large_b_grid()
