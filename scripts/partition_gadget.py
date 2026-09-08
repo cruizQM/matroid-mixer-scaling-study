@@ -139,10 +139,19 @@ class PartitionGadget:
         cost += sum(a - 1 for a in self.items)
         return cost
 
-    def exact_optimum(self) -> int:
+    def exact_optimum(self, stats: dict | None = None) -> int:
         """Exact DP over sorted bucket-sum states (buckets with equal
         current sum are interchangeable) -- exponentially cheaper than
-        raw m^k enumeration, exact, not a heuristic."""
+        raw m^k enumeration, exact, not a heuristic.
+
+        Its cost is the number of DISTINCT partial-sum states it meets,
+        which is what makes B matter: at B=15 with items from {4,5,6,7}
+        the sums collide into a few hundred states at any m; random
+        large-B items don't collide and the count approaches m^k/m!.
+        Pass a dict as `stats` to have `stats["states"]` count cache
+        misses as they happen -- it keeps its value even if the call is
+        interrupted by a timeout, which is exactly when the count is
+        most informative."""
         import functools
 
         items_sorted = sorted(self.items, reverse=True)
@@ -150,6 +159,8 @@ class PartitionGadget:
 
         @functools.lru_cache(maxsize=None)
         def rec(idx: int, sums: tuple[int, ...]) -> int:
+            if stats is not None:
+                stats["states"] = stats.get("states", 0) + 1
             if idx == n:
                 return sum((1 + s) ** 2 for s in sums)
             item = items_sorted[idx]

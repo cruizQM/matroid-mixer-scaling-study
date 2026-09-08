@@ -33,8 +33,10 @@ README:
 
 6. `hard_instance_proof_time_plot.png` -- CP-SAT proof time vs. gadget
    size, timeouts drawn as a wall.
-7. `mps_convergence_plot.png` -- MPS expected cost / true optimum vs.
-   bond dimension, one line per m, exact level where computable.
+7. `mps_convergence_plot.png` -- MPS accuracy vs. exact where
+   computable, and simulation time vs. size at fixed bond dimension.
+8. `large_b_grid_plot.png` -- the two dials (m, B) as a grid, one panel
+   per classical route, DP cells carrying their state counts.
 
 (Two earlier figures were removed as redundant once the README's own
 sections were tightened: `ladder_cx_plot.png` -- its one line was already
@@ -357,39 +359,153 @@ def plot_hard_instance_proof_time() -> None:
 
 
 def plot_mps_convergence() -> None:
-    """Does a classical tensor-network (MPS) simulator converge on the
-    hard-instance circuit as bond dimension grows? From
-    results/mps_scaling_check.csv, p=2. Plotted as expected cost over the
-    true optimum so every m shares one axis; where an exact statevector
-    value exists (m=2, m=3) it is drawn as a dashed level in the same
-    color -- the gap to it at the largest bond dimension is the point.
-    The m=7, bond-64 run that exceeded its time budget is absent."""
+    """Can a classical tensor-network (MPS) simulator stand in for the
+    hard-instance circuit? Two panels, one per half of the finding, from
+    results/mps_scaling_check.csv (p=2, fixed representative angles).
+
+    Left -- accuracy, only where it can be judged: the sizes with an
+    exact statevector reference (m=2 and m=3). Relative error vs. bond
+    dimension, in percent, so both lines share a meaningful axis. m=2
+    converges; m=3 plateaus ~8% off and does not move.
+
+    Right -- simulation time: wall-clock at a fixed bond dimension (64)
+    vs. size, against a dashed baseline of what the time would be if it
+    grew only with the circuit's own gate count (computed from the
+    circuit's structure, scaled to match at the smallest size). The gap
+    between the measured line and the baseline is the price of
+    representing entanglement, not circuit size. The m=7 run that
+    exceeded its budget is drawn hollow at the time it had consumed when
+    discarded -- a lower bound. Deliberately never called "cost": in
+    this repo cost means circuit cost (CX count), and this axis is
+    seconds.
+
+    An earlier single-panel version plotted expected cost / optimum for
+    every m on one axis; that number differs per m even for the exact
+    answer, so the lines were not comparable and, for m>=4, there was
+    no reference to converge to -- unreadable."""
+    from math import comb
+
     rows = _rows("mps_scaling_check.csv")
-    ms = sorted({int(r["m"]) for r in rows})
-    cmap = plt.get_cmap("viridis")
-    fig, ax = plt.subplots(figsize=(8, 4.6))
-    for i, m in enumerate(ms):
-        color = cmap(i / max(1, len(ms) - 1))
-        mps = sorted((int(r["bond_dim"]), float(r["expected_cost"]) / float(r["exact_optimum"]))
+    fig, (ax_err, ax_cost) = plt.subplots(1, 2, figsize=(12, 4.6))
+
+    # --- left: relative error where exact is known
+    for m, color in ((2, "#4472C4"), (3, "#C0392B")):
+        exact = next(float(r["expected_cost"]) for r in rows
+                     if int(r["m"]) == m and r["method"] == "statevector" and r["expected_cost"])
+        pts = sorted((int(r["bond_dim"]), 100.0 * abs(float(r["expected_cost"]) - exact) / exact)
                      for r in rows if int(r["m"]) == m and r["method"] == "mps" and r["expected_cost"])
-        if not mps:
-            continue
-        xs, ys = zip(*mps)
-        ax.plot(xs, ys, marker="o", color=color, label=f"m={m} ({3 * m * m} qubits)")
-        exact = [float(r["expected_cost"]) / float(r["exact_optimum"])
-                 for r in rows if int(r["m"]) == m and r["method"] == "statevector" and r["expected_cost"]]
-        if exact:
-            ax.hlines(exact[0], xs[0], xs[-1], color=color, ls="dashed", lw=1.2)
-    ax.plot([], [], color="grey", ls="dashed", label="exact (statevector), where computable")
-    ax.set_xscale("log", base=2)
-    ax.set_xlabel("MPS bond dimension")
-    ax.set_ylabel("expected cost / true optimum")
-    ax.set_title("MPS does not converge to the exact answer at modest bond dimension (p=2)", fontsize=11)
-    ax.grid(True, alpha=0.3, which="both")
-    handles, labels = ax.get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=4, fontsize=8.5, bbox_to_anchor=(0.5, -0.04))
-    fig.tight_layout(rect=(0, 0.1, 1, 1))
+        xs, ys = zip(*pts)
+        ax_err.plot(xs, ys, marker="o", color=color, label=f"m={m} ({3 * m * m} qubits)")
+        ax_err.annotate(f"{ys[-1]:.1f}%", (xs[-1], ys[-1]), textcoords="offset points", xytext=(6, 0),
+                        fontsize=8.5, color=color, va="center")
+    ax_err.set_xscale("log", base=2)
+    ax_err.set_xlabel("MPS bond dimension")
+    ax_err.set_ylabel("error vs. exact statevector (%)")
+    ax_err.set_title("Accuracy, where exact is computable", fontsize=11)
+    ax_err.grid(True, alpha=0.3, which="both")
+    ax_err.legend(fontsize=8.5)
+
+    # --- right: wall-clock at bond dim 64 vs. size, against a circuit-size baseline
+    def two_qubit_gates(m: int, p: int = 2) -> int:
+        k = 3 * m
+        return p * (2 * comb(k, 2) * m + 4 * k * comb(m, 2))  # rzz -> 2 CX, exchange_swap -> 4 CX
+
+    bd64 = sorted((int(r["m"]), float(r["wall_clock_s"]), bool(r["error"]))
+                  for r in rows if r["method"] == "mps" and int(r["bond_dim"]) == 64)
+    ms = [b[0] for b in bd64]
+    ts = [b[1] for b in bd64]
+    ok = [(m, t) for m, t, err in bd64 if not err]
+    bad = [(m, t) for m, t, err in bd64 if err]
+    ax_cost.plot([m for m, _ in ok], [t for _, t in ok], marker="o", color="#C0392B", label="measured, bond dimension 64")
+    for m, t in bad:
+        ax_cost.plot([m], [t], marker="o", markersize=11, markerfacecolor="white", markeredgecolor="#C0392B",
+                     markeredgewidth=2, linestyle="none")
+        ax_cost.annotate("over budget\n(lower bound)", (m, t), textcoords="offset points", xytext=(-62, -22),
+                         fontsize=8, color="#C0392B")
+    m0, t0 = ok[1] if len(ok) > 1 else ok[0]  # anchor the baseline at m=3, the first non-trivial size
+    baseline = [t0 * two_qubit_gates(m) / two_qubit_gates(m0) for m in ms]
+    ax_cost.plot(ms, baseline, ls="dashed", color="grey", label="if time grew only with circuit size")
+    ax_cost.set_yscale("log")
+    ax_cost.set_xlabel("m  (qubits = 3m²)")
+    ax_cost.set_ylabel("MPS simulation time (s)")
+    ax_cost.set_title("Simulation time at fixed bond dimension (64)", fontsize=11)
+    ax_cost.grid(True, alpha=0.3, which="both")
+    ax_cost.legend(fontsize=8.5, loc="upper left")
+
+    fig.suptitle("MPS on the hard-instance circuit (p=2): accurate only at the smallest size, and increasingly slow",
+                 fontsize=11.5)
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
     out = RESULTS_DIR / "mps_convergence_plot.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"wrote {out}")
+
+
+def plot_large_b_grid() -> None:
+    """The two dials of the hard instance on one figure: m (rows, sets
+    the size -- qubits = 3m^2) and B (columns, sets the magnitude of the
+    weights and nothing else). One panel per classical route, from
+    results/large_b_hardness_sweep.csv; a cell is green if that route
+    succeeded (DP finished / CP-SAT proved) and red if it failed (timed
+    out / unproved at the cap), labeled with the time. DP cells also
+    carry the number of partial-sum states explored, from
+    results/large_b_dp_states.csv -- the mechanism: B doesn't grow the
+    instance, it grows the DP's memo table, because random large
+    weights produce sums that stop colliding."""
+    sweep = _rows("large_b_hardness_sweep.csv")
+    states_rows = {(int(r["m"]), int(r["B"])): r for r in _rows("large_b_dp_states.csv")} \
+        if (RESULTS_DIR / "large_b_dp_states.csv").exists() else {}
+    ms = sorted({int(r["m"]) for r in sweep})
+    bs = sorted({int(r["B"]) for r in sweep})
+    cell = {(int(r["m"]), int(r["B"])): r for r in sweep}
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.4))
+    ok_color, fail_color = "#CDEBD6", "#F4C7C3"
+    for ax, title, which in ((axes[0], "Structure-aware route: the exact DP", "dp"),
+                             (axes[1], "General-purpose route: CP-SAT on the natural MILP", "cpsat")):
+        for i, m in enumerate(ms):
+            for j, B in enumerate(bs):
+                r = cell.get((m, B))
+                if r is None:
+                    ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor="white", edgecolor="#999999"))
+                    ax.text(j + 0.5, i + 0.5, "not run", ha="center", va="center", fontsize=8, color="#999999")
+                    continue
+                if which == "dp":
+                    failed = r["dp_timed_out"] == "True"
+                    t = float(r["dp_time_s"])
+                    line1 = f">{t / 60:.0f} min, timed out" if failed else f"{t:.2f}s"
+                    s = states_rows.get((m, B))
+                    line2 = ""
+                    if s is not None:
+                        n = int(s["dp_states"])
+                        line2 = f"\n{n:,}{'+' if s['dp_timed_out'] == 'True' else ''} states"
+                    text = line1 + line2
+                else:
+                    failed = r["cpsat_proved_optimal"] != "True"
+                    t = float(r["cpsat_time_s"])
+                    text = f">{t / 60:.0f} min, unproved" if failed else f"{t:.1f}s, proved"
+                ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor=fail_color if failed else ok_color,
+                                           edgecolor="#999999"))
+                ax.text(j + 0.5, i + 0.5, text, ha="center", va="center", fontsize=8.5)
+        ax.set_xlim(0, len(bs))
+        ax.set_ylim(0, len(ms))
+        ax.set_xticks([j + 0.5 for j in range(len(bs))])
+        ax.set_xticklabels([f"B = {B:,}" for B in bs])
+        ax.set_yticks([i + 0.5 for i in range(len(ms))])
+        ax.set_yticklabels([f"m = {m}\n({3 * m * m} qubits)" for m in ms])
+        ax.set_xlabel("B — magnitude of the weights (graph and circuit unchanged)")
+        if ax is axes[0]:
+            ax.set_ylabel("m — size of the instance")
+        ax.set_title(title, fontsize=10.5)
+        ax.tick_params(length=0)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+    handles = [plt.Rectangle((0, 0), 1, 1, facecolor=ok_color, edgecolor="#999999", label="route succeeded"),
+               plt.Rectangle((0, 0), 1, 1, facecolor=fail_color, edgecolor="#999999", label="route failed at its cap")]
+    fig.legend(handles=handles, loc="lower center", ncol=2, fontsize=9, bbox_to_anchor=(0.5, -0.02))
+    fig.suptitle("Two dials: m makes the instance bigger, B makes it harder without making it bigger", fontsize=11.5)
+    fig.tight_layout(rect=(0, 0.06, 1, 0.94))
+    out = RESULTS_DIR / "large_b_grid_plot.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"wrote {out}")
@@ -403,3 +519,4 @@ if __name__ == "__main__":
     plot_real_network_comparison()
     plot_hard_instance_proof_time()
     plot_mps_convergence()
+    plot_large_b_grid()

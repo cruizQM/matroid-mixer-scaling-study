@@ -28,7 +28,8 @@ narrative.
 - **Hard-instance case study** (`docs/hard-instance-case-study.md`):
   `partition_gadget.py`, `gadget_graph.py`, `partition_mixer.py`,
   `verify_partition_mixer.py`, `measure_partition_mixer.py`,
-  `run_hardness_sweep.py`, `run_mps_scaling_check.py`.
+  `run_hardness_sweep.py`, `run_mps_scaling_check.py`,
+  `run_large_b_sweep.py`, `run_large_b_dp_states.py`.
 
 `results/` holds one CSV/plot pair per script above, all generated, none
 hand-edited. `*_before_minimization.*` files are pre-fix numbers, kept for

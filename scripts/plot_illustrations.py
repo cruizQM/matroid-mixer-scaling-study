@@ -411,9 +411,9 @@ def plot_partition_gadget() -> None:
     nx.draw_networkx_labels(g, pos, ax=ax, labels=labels, font_size=8, font_color="white")
 
     ax.text(-4.9, 3.0, "root", fontsize=9, va="center", color="#333333")
-    ax.text(-4.9, 2.0, f"{m} buckets", fontsize=9, va="center", color="#C0392B")
-    ax.text(-4.9, 1.0, f"{k} items (weight a)", fontsize=9, va="center", color="#2E8B57")
-    ax.text(-4.9, 0.0, "a−1 leaves each", fontsize=9, va="center", color="#888888")
+    ax.text(-4.9, 2.0, f"m = {m} buckets\n(target weight B = {gadget.B} each)", fontsize=9, va="center", color="#C0392B")
+    ax.text(-4.9, 1.0, f"3m = {k} items\nweight a, with B/4 < a < B/2", fontsize=9, va="center", color="#2E8B57")
+    ax.text(-4.9, 0.0, "a−1 leaves each\n(how the weight is built in)", fontsize=9, va="center", color="#888888")
     ax.set_xlim(-5.2, 4.2)
     ax.axis("off")
     handles = [

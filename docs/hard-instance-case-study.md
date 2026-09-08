@@ -26,13 +26,20 @@ for spanning tree T, where `successors(e)` counts the nodes in the subtree hangi
 
 **The gadget** (`partition_gadget.py`, `gadget_graph.py`): given k=3m integers a_1..a_k, each strictly between B/4 and B/2, summing to m·B — build a root r, m "bucket" nodes each connected to r, k "item" nodes each connected to *every* bucket node, and each item node carrying (a_i − 1) private leaf nodes. The true minimum cost equals m·(1+B)² + constant iff the a_i admit a perfect 3-partition into m groups of 3 summing to B each.
 
+**What m and B mean, in plain terms — because every result below is indexed by one or the other.**
+
+- **m is the number of buckets, and it sets the instance's size.** There are always k = 3m items. In the network that is 1 + m + k nodes before leaves; in the circuit it is one qubit per (item, bucket) pair, k·m = 3m² qubits. Every "as m grows" result is a size-scaling result.
+- **B is the target weight per bucket, and it sets the magnitude of the weights — nothing else.** Every item weight a_i lies strictly between B/4 and B/2 (so exactly three items fit in a bucket), and the weights sum to m·B. In the leaf gadget an item's weight is encoded as a_i − 1 leaf nodes, so the leaf count *does* grow with B there; in the weighted formulation used by `run_large_b_sweep.py` the weight is a nodal demand and the graph does not grow at all. The circuit never grows with B in either case: B changes the Hamiltonian's coefficients, not its qubit count or gate count.
+- **Why the two are separated.** A solver that reasons about partial bucket sums has to distinguish as many distinct sums as the weights can produce. At B=15 the weights are drawn from {4,5,6,7} and those sums collide massively, which is why the exact DP is instant at every m in the table below. Random large-B weights do not collide, which is why the DP hits its m^k/m! wall at m≥5 (see `results/large_b_hardness_sweep.csv`). Growing m makes the instance bigger; growing B makes it harder without making it bigger.
+- **YES / NO.** A YES instance admits a perfect partition into m groups of weight exactly B; a NO instance does not. NO is the exhaustive direction — the solver must rule out every alternative — and is the one that matters for hardness.
+
 ## Part 1: the classical hardness curve (measured, not assumed)
 
 `run_hardness_sweep.py` builds this gadget at increasing m, and times CP-SAT proving optimality — cross-checked at every single point against an independent exact DP (`PartitionGadget.exact_optimum`, which exploits the same forced-edge structure described below but computes the answer via dynamic programming, not the MILP) so that a "hard" result is never trusted without an independent ground truth alongside it.
 
 Raw results: `results/hard_instance_hardness_sweep.csv`.
 
-**The caveat that the cross-check exposes, stated up front rather than after the table.** The exact DP is not just a verifier — it is a fast classical algorithm for these instances. It memoizes on the sorted tuple of partial bucket sums, so its state count is bounded by the number of distinct sum-multisets, and with items drawn from {4,5,6,7} at fixed B=15 those collide massively: it runs in milliseconds at every m in the table. Strong NP-hardness of 3-PARTITION requires the bucket size B to grow with m; at fixed B the problem is pseudo-polynomial, and every instance below is one a structure-aware classical solver handles instantly. What the table measures is therefore a general-purpose solver failing on the *natural graph formulation* — real and useful (it is what a practitioner would reach for first), but not evidence that no classical route exists. The route to genuine hardness is large B: it inflates the DP (state count grows with the number of distinct reachable sums) and the MILP (O(mB) leaf nodes), while the QAOA circuit stays at 3m² qubits regardless of B. That experiment is scoped, not yet run.
+**The caveat that the cross-check exposes, stated up front rather than after the table.** The exact DP is not just a verifier — it is a fast classical algorithm for these instances. It memoizes on the sorted tuple of partial bucket sums, so its state count is bounded by the number of distinct sum-multisets, and with items drawn from {4,5,6,7} at fixed B=15 those collide massively: it runs in milliseconds at every m in the table. Strong NP-hardness of 3-PARTITION requires the bucket size B to grow with m; at fixed B the problem is pseudo-polynomial, and every instance below is one a structure-aware classical solver handles instantly. What the table measures is therefore a general-purpose solver failing on the *natural graph formulation* — real and useful (it is what a practitioner would reach for first), but not evidence that no classical route exists. The route to genuine hardness is large B: it inflates the DP (state count grows with the number of distinct reachable sums) and the MILP (O(mB) leaf nodes), while the QAOA circuit stays at 3m² qubits regardless of B. That experiment is Part 4 below.
 
 | m | nodes | edges | YES proof time | NO proof time |
 |---|---|---|---|---|
@@ -98,13 +105,43 @@ Raw results: `results/mps_scaling_check.csv`.
 Two findings, both real and not manufactured to fit a narrative:
 
 1. **MPS does not converge cleanly even where exact ground truth is available.** At m=3, bond dimension 64 still misses the exact value by ~120 (a 7.7% relative error) — not the near-exact match a "just needs a bit more bond dimension" story would predict. Beyond m=3, where no exact answer exists to check against, the bd=16 → bd=64 values are *not monotonically converging* either (m=5's bd=64 estimate is actually further from bd=16 than one would want, m=6's bd=16 and bd=64 roughly agree, m=7's bd=64 didn't finish) — the honest read is that a fixed, modest bond dimension cannot be trusted to track the true value as m grows, not that it converges slowly.
-2. **Wall-clock cost at a fixed bond dimension (64) explodes**: 5.4s → 26.8s → 83.7s → 193.1s → over 390s, for m=3→7 — roughly 70x for less than a 6x increase in qubit count. This is a real, measured cost blow-up, not an extrapolation, and it happens on top of — not despite — accuracy already being questionable at the same bond dimension.
+2. **Simulation time at a fixed bond dimension (64) explodes**: 5.4s → 26.8s → 83.7s → 193.1s → over 390s, for m=3→7 — roughly 70x for less than a 6x increase in qubit count. This is a real, measured cost blow-up, not an extrapolation, and it happens on top of — not despite — accuracy already being questionable at the same bond dimension.
 
 **Conclusion for this section**: a classical tensor-network simulator does not offer a reliable shortcut here either. This directly satisfies E.ON's secondary ask (a struggling MPS simulator, not just a struggling exact MILP solver), and it also gives the honest answer to the approximation-ratio question below: the gap isn't closed because it was left unmeasured, it's open because the two most natural classical proxies for "just simulate it and see" both hit real, measured walls at a similar, small scale.
 
+## Part 4: turning B up — hardness for every classical route tried
+
+`run_large_b_sweep.py` and `run_large_b_dp_states.py`. Same gadget family; weights drawn uniformly at random from (B/4, B/2) and walked to sum exactly m·B (seed 0), at m ∈ {4, 5, 6} and B ∈ {15, 1,000, 10,000}. Random large-B instances are almost surely NO-instances, and NO is the exhaustive direction. CP-SAT solves the weighted-demand formulation (P1: item node demand a_i, bucket node demand 1) rather than the leaf gadget, so the graph is 1 + m + 3m nodes at every B — the leaf gadget would have ~60,000 forced leaves at B=10,000 and CP-SAT's time would then measure presolve on a huge model, not the combinatorial core. B=15 is re-run under this formulation so every row is like-for-like. CP-SAT cap 30 min, DP cap 5 min; on a DP timeout the number of memo states reached is recorded as a lower bound.
+
+Raw results: `results/large_b_hardness_sweep.csv` (times, statuses, objectives, items), `results/large_b_dp_states.csv` (state counts).
+
+| m (qubits) | B | graph | DP time | DP states | CP-SAT |
+|---|---|---|---|---|---|
+| 4 (48) | 15 | 17 nodes / 52 edges | 0.02s | 2,906 | proved, 11.6s |
+| 4 (48) | 1,000 | same | 1.15s | 609,212 | **unproved at 30 min** |
+| 4 (48) | 10,000 | same | 1.02s | 913,536 | **unproved at 30 min** |
+| 5 (75) | 15 | 21 / 80 | 0.03s | 22,729 | proved, 76.5s |
+| 5 (75) | 1,000 | same | **timed out, 5 min** | >56.4 M | **unproved at 30 min** |
+| 5 (75) | 10,000 | same | **timed out** | >56.5 M | **unproved at 30 min** |
+| 6 (108) | 15 | 25 / 114 | 0.24s | 144,577 | proved, 24.6s |
+| 6 (108) | 1,000 | same | **timed out** | >55.7 M | **unproved at 30 min** |
+| 6 (108) | 10,000 | same | **timed out** | >54.5 M | *(running at time of writing)* |
+
+Every CP-SAT objective at B=15 matches the DP exactly. Where the DP timed out there is no exact value to compare against — CP-SAT's returned objective is a feasible solution neither route can certify, which is the point.
+
+**Reading the table.** Two dials, two different effects:
+
+- **B alone defeats CP-SAT, at every m.** The 17-node m=4 graph is unproved after 30 minutes at B=1,000, where it was proved in 12 seconds at B=15. Model size is not the explanation — the graph is identical across the row. Large weights weaken the relaxation the proof depends on.
+- **B alone does *not* defeat the DP; B and m together do.** The DP's work is the number of distinct partial-sum states, bounded by roughly m^k/m!. At m=4 that is ~7×10⁵ and the DP finishes in a second at any B. At m=5 it is ~2.5×10⁸: the DP passed 56 million states in five minutes and stopped. The state counts make the mechanism explicit — at B=15 the weights from {4,5,6,7} collide into a few thousand states at every m; random large weights do not collide at all.
+- **The circuit is unchanged down every row.** 3m² qubits and a gate count that depends only on (m, k). B enters only as the RZZ rotation angles (∝ a_i·a_i'). Raising B from 15 to 10,000 changes the numbers dialed into the same circuit.
+
+**The cell that settles the caveat from Part 1** is m=5, B=1,000: both classical routes tried fail on one measured instance, at 75 qubits. m=6 confirms it at 108 qubits.
+
+**What this does not show.** Two classical routes, not all: a MIP solver with a purpose-built cutting-plane formulation, or a smarter DP over a different state space, might do better. The claim is that the two most natural routes — the general-purpose solver a practitioner would reach for, and the structure-aware algorithm the hardness proof itself suggests — both fail at a size where the circuit is 75 qubits and about 1,650 two-qubit gates per QAOA layer (from the circuit's structure; the transpiled count was measured directly only at m=4).
+
 ## Honest scope of this document
 
-- **These specific instances are not classically hard.** See the caveat at the top of Part 1: at fixed B=15 the repo's own DP solves every one of them in milliseconds. What is demonstrated is that a general-purpose solver on the natural formulation fails at small size, and that the circuit construction works there. Instance-level hardness against *every* classical route needs B to grow with m, which is the scoped next experiment.
+- **The B=15 instances of Parts 1–3 are not classically hard.** See the caveat at the top of Part 1: at fixed B=15 the repo's own DP solves every one of them in milliseconds. What Parts 1–3 demonstrate is that a general-purpose solver on the natural formulation fails at small size, and that the circuit construction works there. Part 4 supplies what they lack: at m≥5 with random weights at B≥1,000, both classical routes tried fail on a single measured instance. "Both routes tried" is the honest scope — two routes, not all routes.
 - **This is not a demonstrated quantum advantage.** The circuit is shown to be small and to compile/transpile cheaply at the size where classical proof cost is already climbing steeply — a *necessary* condition for a quantum approach to be worth pursuing here, not a sufficient one. The approximation ratio (expected cost vs. `PartitionGadget.exact_optimum`) is now measured exactly at m=2 and m=3 (Part 3's table, statevector column) at a fixed representative angle (0.37 half-turns, this repo's existing convention for "a concrete, reproducible value," not a claimed optimum) — ratios of 1.27 and 1.49 respectively. Beyond m=3, exact simulation is impossible (m=4 alone needs 48 qubits, 4.3 exabytes) and MPS was shown in Part 3 to not reliably substitute for it. So the honest status is: verified at trivial scale, genuinely unknown at the scale where classical hardness actually bites (m=9-11), and that gap is not for lack of trying — it survived both an exact-simulation attempt and a tensor-network attempt.
 - **This is a different mixer from `mixer.py`'s**, not a generalization of it. It works because this specific reduction happens to decompose into independent one-hot subproblems; that is a property of this instance family, discovered by reading the hardness proof's own structure, not a general recipe that would apply to an arbitrary hard matroid-basis problem.
 - **The two negative attempts** (random quadratic cost, congestion cost) are reported here because they were real, informative dead ends — not polished away — and directly motivate why a structural construction was needed instead of a bigger real network.
