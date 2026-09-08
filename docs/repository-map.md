@@ -30,6 +30,9 @@ narrative.
   `verify_partition_mixer.py`, `measure_partition_mixer.py`,
   `run_hardness_sweep.py`, `run_mps_scaling_check.py`,
   `run_large_b_sweep.py`, `run_large_b_dp_states.py`.
+- **Cycle-basis cost surrogate** (`docs/cycle-surrogate.md`):
+  `cycle_surrogate.py`, `verify_cycle_surrogate.py`,
+  `verify_cycle_surrogate_full.py`.
 
 `results/` holds one CSV/plot pair per script above, all generated, none
 hand-edited. `*_before_minimization.*` files are pre-fix numbers, kept for
