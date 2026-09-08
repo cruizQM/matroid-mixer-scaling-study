@@ -82,19 +82,37 @@ def plot_construction_progression() -> None:
     # it), not a claim about real feeders: real tie switches are
     # long-range by design (33-45% of network diameter), so the
     # README-facing figure shows only the condition that models them.
-    whole = _rows("fixed_alpha_ladder_summary.csv")
-    capped = _rows("cost_capped_decomposition_summary.csv")
+    # Per-seed rows, not the summary CSVs: the summaries carry mean/std or
+    # mean/max only, and an evaluator reading a means-only line has no way
+    # to see that decomposed variants reach 99% coefficient of variation
+    # at some sizes (docs/scaling-ladder-and-decomposition.md §11). Min-max
+    # bars over the 3 seeds make the spread visible on the headline figure.
+    whole = _rows("fixed_alpha_ladder_results.csv")
+    capped = _rows("cost_capped_decomposition_results.csv")
+
+    def seed_stats(rows, cx_col):
+        by_n: dict[int, list[float]] = {}
+        for r in rows:
+            if r["condition"] == "long_log":
+                by_n.setdefault(int(r["n_nodes"]), []).append(float(r[cx_col]))
+        xs = sorted(by_n)
+        means = [sum(by_n[x]) / len(by_n[x]) for x in xs]
+        lo = [m - min(by_n[x]) for m, x in zip(means, xs)]
+        hi = [max(by_n[x]) - m for m, x in zip(means, xs)]
+        return xs, means, [lo, hi]
 
     fig, ax = plt.subplots(figsize=(8, 4.8))
-    xs_w, ys_w = _series(whole, "condition", "long_log", "n_nodes", "cx_mean")
-    xs_c, ys_c = _series(capped, "condition", "long_log", "n_nodes", "cx_mean")
-    ax.plot(xs_w, ys_w, marker="o", color="#C0392B", label="whole-graph, no decomposition — fault-tolerant tier")
-    ax.plot(xs_c, ys_c, marker="^", color="#2E8B57", label="cost-capped decomposition — NISQ tier")
+    xs_w, ys_w, err_w = seed_stats(whole, "cx_count")
+    xs_c, ys_c, err_c = seed_stats(capped, "total_cx")
+    ax.errorbar(xs_w, ys_w, yerr=err_w, marker="o", capsize=3, color="#C0392B",
+                label="whole-graph, no decomposition — fault-tolerant tier")
+    ax.errorbar(xs_c, ys_c, yerr=err_c, marker="^", capsize=3, color="#2E8B57",
+                label="cost-capped decomposition — NISQ tier")
     ax.axhline(CX_THRESHOLD, color="black", ls="dashed", lw=1, label=f"{CX_THRESHOLD} CX target")
     ax.set_yscale("log")
     ax.set_xlabel("network size (n_nodes)")
-    ax.set_ylabel("transpiled CX count (mean over seeds)")
-    ax.set_title("Synthetic feeders with real-topology tie statistics: the two tiers", fontsize=11)
+    ax.set_ylabel("transpiled CX count")
+    ax.set_title("Synthetic feeders with real-topology tie statistics: the two tiers\n(mean over 3 seeds, bars = min–max)", fontsize=11)
     ax.grid(True, alpha=0.3, which="both")
     # Legend below the axes: every inside corner is occupied by one of
     # the two curves (red rises top-left, plateaus top-right; green

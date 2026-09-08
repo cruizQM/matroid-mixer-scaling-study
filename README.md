@@ -1,4 +1,4 @@
-# A feasibility-preserving QAOA mixer for grid reconfiguration — and a provably hard instance of the same problem
+# A feasibility-preserving QAOA mixer for grid reconfiguration — and a provably hard family of the same problem
 
 ## Two questions, one problem
 
@@ -19,13 +19,15 @@ connected, no loops — as switches open and close. And it asks two
 questions about it, in order:
 
 1. **Can the mixer be made cheap enough for real hardware?** Yes — at
-   two tiers, one for fault-tolerant machines and one that fits today's
-   noisy devices, validated on real published grids.
+   two tiers, one for fault-tolerant machines and one that meets a
+   500-CX budget on every instance tested, validated on real published
+   grids.
 2. **Is this problem actually hard enough to need quantum?** For real
    grids, honestly, no — a classical solver walks them. But there is a
-   provably hard instance of the *same* problem, and this repo builds
-   it, measures a real solver giving up on it, and shows the circuit
-   for it is small.
+   provably hard *family* of the same problem. This repo builds
+   instances from it, measures a general-purpose solver giving up on
+   them, and shows the circuit for them is small — with one caveat,
+   stated where it arises, that sets up the next experiment.
 
 The second question is the one most quantum-optimization work skips.
 
@@ -80,12 +82,21 @@ gives a complete, fully connected mixer at a cost fault-tolerant
 hardware can absorb.
 
 **Tier 2 — zones, for today's hardware.** Cut the network into small
-zones along its tie lines, build a cheap exact mixer for each zone, and
+zones along its tie lines, build a Tier 1 mixer inside each zone, and
 stitch them together with one small mixer over the contracted "zone
-graph." The mathematics of spanning trees makes this decomposition
-**exact** — nothing leaks. Then enforce a cost budget directly:
-transpile each piece, check its real gate count, and split or retune
-any piece that comes in over the line.
+graph." The mathematics of spanning trees guarantees the stitched
+result is a valid tree, so the decomposition itself cannot leak. Then
+enforce a cost budget: transpile each piece, check its real gate count,
+and split or retune any piece that comes in over the line.
+
+Two honest limits. Tier 2 searches only trees that stay connected
+*inside* every zone — a subset of all feasible configurations, so an
+optimum that doesn't respect the zone boundaries is out of reach. And
+leakage inside a zone is prevented in practice by keeping zones small,
+not by construction. The 500-CX budget is a target the algorithm
+recurses toward; the finding is that on every instance tested it got
+there without leaking and without ever invoking its cost-for-safety
+fallback.
 
 ![A graph partitioned into zones, plus the contracted assembly problem](results/illustration_decomposition.png)
 
@@ -117,22 +128,27 @@ that actually drive cost. So the ladder answers *does it scale?*, the
 real feeders answer *does it transfer?*, and each is convincing only
 because of the other.
 
-**The synthetic ladder** runs from 10 to 150 nodes, matched to real
-feeders in the two ways that matter: every tie is long-range, and the
-number of ties grows only logarithmically with network size. That
-second fact comes from real data: across real and benchmark feeders
-from 15 to 179 buses, the ratio of ties to buses falls about 6×, which
-is what logarithmic growth looks like. Larger real grids
+**The synthetic ladder** runs from 10 to 150 nodes, three random
+feeders per size, matched to real feeders in the two ways that matter:
+every tie is long-range, and the number of ties grows only
+logarithmically with network size. That second fact comes from real
+data — thin data, three published feeders being all that exist at this
+scope, but consistent: from 15 to 179 buses the ratio of ties to buses
+falls about 6×, which is what logarithmic growth looks like. Larger real grids
 don't get proportionally more redundancy, just a little more.
 
-![Synthetic feeders with real-topology tie statistics: the two tiers](results/construction_progression_plot.png)
+![Synthetic feeders with real-topology tie statistics: the two tiers (mean over 3 seeds, bars = min–max)](results/construction_progression_plot.png)
 
-At the largest size (150 nodes), Tier 1 costs 10,712 CX and Tier 2
-costs **337 CX**. Cost alone isn't the whole question, though: Tier 1
-gets its cost down by capping conditions, so it has to be asked how
-much exactness the cap gave up. The answer is leakage of up to 9%. Tier 2,
-asked the same question, gave up nothing — it never leaks, at any size.
-Cheaper *and* exact, not a tradeoff.
+At the largest size (150 nodes, 156 qubits), Tier 1 costs 10,712 CX at
+depth ~18,600; Tier 2 costs 337 CX at depth ~650. That is under the
+500-CX line, but by the yardstick above it is viable on trapped-ion
+hardware and marginal on superconducting. Cost alone isn't the whole
+question, though: Tier 1 gets its cost down by capping conditions, so
+it has to be asked how much exactness the cap gave up. The answer is
+mean leakage of up to 9%, with roughly a third of starting
+configurations leaking at all. Tier 2, asked the same question, gave up
+nothing on any instance tested. Cheaper *and* exact in practice, not a
+tradeoff.
 
 **The real feeders** are the transfer test: topology nobody designed to
 be convenient. Both tiers were built on the CIGRE MV benchmark (15
@@ -144,9 +160,14 @@ random seeds each:
 ![Where each real network's two tiers land relative to NISQ feasibility](results/real_nisq_feasibility_plot.png)
 
 Tier 2 lands comfortably inside today's hardware budget on both
-networks, and its number is identical across every seed — predictable,
+networks — 64 CX at depth 147 on 17 qubits, 132 CX at depth 272 on 37
+qubits — and its number is identical across every seed: predictable,
 not just cheap. Tier 1 stays complete and fully connected on both, at a
-cost only fault-tolerant hardware could absorb.
+cost only fault-tolerant hardware could absorb. But fault tolerance
+removes gate error, not leakage, and Tier 1's leakage is permanent: on
+IEEE33, 43% of starting configurations leak. There is, in other words,
+no exact *and* complete whole-graph construction that works on real
+topology — the exact one comes out disconnected, and Tier 1 leaks.
 
 The full account — including the intermediate constructions, the
 short-range control condition, and the safety measurements not shown
@@ -180,7 +201,14 @@ different objection:
   *prove* the tree is optimal. CP-SAT's proof time grows from a few
   seconds on a 65-node instance to a 30-minute timeout, proof
   unfinished, at 177 nodes. Every point is cross-checked against an
-  independent exact calculation.
+  independent exact calculation — and that calculation is the caveat.
+  It is a dynamic program that exploits the very structure the
+  hardness proof exposes, and at the fixed bucket size used here it
+  runs in milliseconds. So what fails is a general-purpose solver on
+  the natural formulation, not every classical route. Genuine hardness
+  needs the bucket size to grow with the instance — which inflates
+  every classical route but leaves the quantum circuit's size untouched.
+  That is the next experiment.
 - **"Then the quantum circuit must be enormous."** Tier 1 and Tier 2
   can't even be started on this instance: both begin by enumerating the
   feasible set, and here that set is astronomically large — which is
@@ -196,15 +224,19 @@ different objection:
   tensor-network (MPS) methods are the strongest classical tool for
   circuits like this one. MPS misses the exact answer by about 8% on
   the smallest instance it can be checked against, and its cost grows
-  roughly 70× over a range where the qubit count grows only 6×.
+  roughly 70× over a range where the circuit itself grows about 14× —
+  the excess is entanglement, not size. This was one simulator at
+  modest bond dimension, though; a stronger tensor-network attempt is
+  the obvious next test.
 
 Notice what just happened: the hard instance needed a *simpler* mixer
 than the real grids did. That is not a contradiction — it is the key to
 how the two halves of this repo fit together. Real grids are
 *structurally* hard to stay feasible on — long loops, expensive
 conditions — but *combinatorially* easy to solve. The
-hard instance is the mirror image: structurally trivial, combinatorially
-brutal. Each construction handles the axis its problem actually has.
+hard family is the mirror image: structurally trivial, combinatorially
+hard in general. Each construction handles the axis its problem
+actually has.
 Whether an instance exists that is hard on both axes at once is an open
 question this repo does not answer.
 
@@ -218,10 +250,12 @@ classical one: there is no objective, no QAOA run, and no test of the
 boundary-coupling loop a real decomposed optimization would need.
 
 Question 2 adds an objective, a real solver comparison, and a
-simulation comparison — but on a purpose-built instance, and it stops
-short of demonstrating advantage. Solution quality at the genuinely
-hard sizes is unmeasured, because both classical ways of checking it
-hit walls first. The case study says so, with numbers.
+simulation comparison — but on purpose-built instances that a
+structure-aware classical algorithm still solves quickly at the bucket
+size used, and it stops short of demonstrating advantage. Solution
+quality at the genuinely hard sizes is unmeasured, because both
+classical ways of checking it hit walls first. The case study says so,
+with numbers.
 
 Nothing broader is claimed for either. This is a measurement study,
 not a production mixer-compilation library; `methodology.md` has the
@@ -263,10 +297,11 @@ python scripts/run_hardness_sweep.py       # CP-SAT hardness curve (slow: hours)
 python scripts/run_mps_scaling_check.py    # the MPS comparison (~15 min)
 ```
 
-All scripts are deterministic (fixed seeds); re-running reproduces the
-committed `results/` files, modulo solver and library version
-differences. Further investigations use the scripts indexed in
-`docs/repository-map.md`.
+The circuit-construction scripts are deterministic (fixed seeds) and
+reproduce the committed `results/` files, modulo library versions. The
+CP-SAT sweep runs 8 parallel workers and its *timings* vary run to run
+by up to ~2×; its objective values do not. Further investigations use
+the scripts indexed in `docs/repository-map.md`.
 
 ## Repository layout
 
