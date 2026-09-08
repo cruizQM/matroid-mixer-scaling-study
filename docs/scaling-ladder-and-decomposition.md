@@ -618,8 +618,10 @@ repo already made for the CATS transmission dataset
 | network | construction | n_terms | CX | depth | result |
 |---|---|---|---|---|---|
 | CIGRE MV (15 buses, 3 ties) | exact whole-graph | 16 | 12,220 | 24,245 | connected, exactly leak-free, 37 candidates dropped |
+| CIGRE MV | cost-aware whole-graph (technique 2, no decomposition) | 16 | **337 (274-432, mean over 5 seeds)** | 536 (seed 0) | fully connected, 0 candidates dropped; unsafe_rate 12.9% mean, mean feasible mass 0.988 |
 | CIGRE MV | decomposed (2 zones) | 10 (seed 0) | **6,771 (3,668-9,178, mean over 5 seeds)** | 7,101 (seed 0) | 1.8x cheaper on average; unsafe_rate 19.4% mean, mean feasible mass 0.9949 mean |
 | IEEE33 (33 buses, 5 ties) | exact whole-graph *(already measured, `results/real_feeder_results.csv`)* | 24 | 96 | 78 | **573 of 597 candidates dropped, disconnected** |
+| IEEE33 | cost-aware whole-graph (technique 2, no decomposition) | 35 | **3,866 (3,456-4,236, mean over 5 seeds)** | 6,462 (seed 0) | fully connected, 0 candidates dropped; unsafe_rate 43.3% mean, mean feasible mass 0.949 |
 | IEEE33 | decomposed (4 zones) | 6 | **132** | 272 | fully functional, identical across all 5 seeds tested; unsafe_rate 0%, mean feasible mass 1.0 |
 
 On IEEE33, decomposition isn't just cheaper than the exact whole-graph
@@ -628,6 +630,23 @@ construction -- the exact construction doesn't work at all there
 instead). This reproduces that same distinction with this branch's
 cost-aware construction rather than the exact one, on genuine published
 topology, not a synthetic stand-in.
+
+**The cost-aware whole-graph rows are the README's fault-tolerant tier
+(Tier 1)**, added when the README was reframed around two deployment
+tiers. The exact whole-graph row is the theoretical baseline, not a
+deployable construction -- on IEEE33 its 96 CX is cheap only because it
+drops 573 of 597 candidates. Technique 2 on the whole graph is the
+honest whole-graph number: complete and fully connected on both
+networks (0 dropped), at 337 and 3,866 CX. Both are built on the
+exactly-enumerated tree set: `measure_truncated_whole_graph` bypasses
+`measure_subproblem`'s sampling fallback, which IEEE33's 435,897
+candidate combinations would otherwise trigger -- enumeration is
+demonstrably affordable there (the exact row already does it), and the
+walked sample gives the majority-vote search strictly less to work
+with. IEEE33's 43% unsafe rate is real and worth stating plainly:
+whole-graph technique 2 on a long-range real feeder leaks meaningfully
+(mean feasible mass 0.949). That leakage is exactly what section 11's
+cost-capped decomposition -- the README's Tier 2 -- removes, at 132 CX.
 
 **CIGRE MV's decomposed number is genuinely unreliable, not just a point
 estimate** -- checked directly across 5 seeds, not assumed from the

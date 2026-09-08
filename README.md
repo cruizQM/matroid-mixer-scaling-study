@@ -1,4 +1,4 @@
-# A feasibility-preserving QAOA mixer for grid reconfiguration — and a hard instance to point it at
+# A feasibility-preserving QAOA mixer for grid reconfiguration — and a provably hard instance of the same problem
 
 ## Two questions, one problem
 
@@ -28,7 +28,6 @@ questions about it, in order:
    for it is small.
 
 The second question is the one most quantum-optimization work skips.
-Here it changes the shape of the answer, so it gets its own section.
 
 ## The problem, and the move that keeps it feasible
 
@@ -121,17 +120,17 @@ because of the other.
 **The synthetic ladder** runs from 10 to 150 nodes, matched to real
 feeders in the two ways that matter: every tie is long-range, and the
 number of ties grows only logarithmically with network size. That
-second fact is measured, not assumed — across real and benchmark
-feeders from 15 to 179 buses, the ratio of ties to buses falls about
-6×, which is what logarithmic growth looks like. Larger real grids
+second fact comes from real data: across real and benchmark feeders
+from 15 to 179 buses, the ratio of ties to buses falls about 6×, which
+is what logarithmic growth looks like. Larger real grids
 don't get proportionally more redundancy, just a little more.
 
 ![Synthetic feeders with real-topology tie statistics: the two tiers](results/construction_progression_plot.png)
 
 At the largest size (150 nodes), Tier 1 costs 10,712 CX and Tier 2
 costs **337 CX**. Cost alone isn't the whole question, though: Tier 1
-buys its cost by capping conditions, so it has to be asked how much
-exactness the cap gave up. The answer is leakage of up to 9%. Tier 2,
+gets its cost down by capping conditions, so it has to be asked how
+much exactness the cap gave up. The answer is leakage of up to 9%. Tier 2,
 asked the same question, gave up nothing — it never leaks, at any size.
 Cheaper *and* exact, not a tradeoff.
 
@@ -160,8 +159,6 @@ So the mixer runs, cheaply, on real grids. The obvious next question is
 whether a quantum computer was ever needed. For the real grids above —
 no. A feeder has only a handful of tie switches, so its set of feasible
 configurations is small, and a classical solver simply enumerates it.
-In fact the constructions above *rely* on that: they need to enumerate
-the feasible set to build their conditioning terms.
 
 The cheapest way to make a real grid harder would be to keep its
 topology and make the objective nastier. That was tried first, on the
@@ -192,7 +189,8 @@ different objection:
   forced, and the few free choices are independent of one another.
   Independent choices need no conditioning, so the mixer needs no
   witness search at all — and 48 qubits with about 800 two-qubit gates
-  cover the size where the classical solver already takes seconds.
+  cover the 65-node instance where the classical solver already takes
+  seconds.
 - **"A classical computer could just simulate that circuit."** A small
   circuit only matters if it can't be shortcut classically, and
   tensor-network (MPS) methods are the strongest classical tool for
@@ -200,9 +198,11 @@ different objection:
   the smallest instance it can be checked against, and its cost grows
   roughly 70× over a range where the qubit count grows only 6×.
 
-This is what makes the two halves of the repo fit together rather than
-compete. Real grids are *structurally* hard to stay feasible on — long
-loops, expensive conditions — but *combinatorially* easy to solve. The
+Notice what just happened: the hard instance needed a *simpler* mixer
+than the real grids did. That is not a contradiction — it is the key to
+how the two halves of this repo fit together. Real grids are
+*structurally* hard to stay feasible on — long loops, expensive
+conditions — but *combinatorially* easy to solve. The
 hard instance is the mirror image: structurally trivial, combinatorially
 brutal. Each construction handles the axis its problem actually has.
 Whether an instance exists that is hard on both axes at once is an open
@@ -212,18 +212,20 @@ Full account: `docs/hard-instance-case-study.md`.
 
 ## What is and isn't shown
 
-The construction work shows the mixer is correct and cheap enough for
-both hardware tiers. It does not show a quantum algorithm beating a
+Question 1 shows the mixer is correct and cheap enough for both
+hardware tiers. It does not show a quantum algorithm beating a
 classical one: there is no objective, no QAOA run, and no test of the
 boundary-coupling loop a real decomposed optimization would need.
 
-The hard-instance study adds an objective, a real solver comparison,
-and a simulation comparison — but on a purpose-built instance, and it
-stops short of demonstrating advantage. Solution quality at the
-genuinely hard sizes is unmeasured, because both classical ways of
-checking it hit walls first. The case study says so, with numbers.
+Question 2 adds an objective, a real solver comparison, and a
+simulation comparison — but on a purpose-built instance, and it stops
+short of demonstrating advantage. Solution quality at the genuinely
+hard sizes is unmeasured, because both classical ways of checking it
+hit walls first. The case study says so, with numbers.
 
-`methodology.md` has the precise measurement boundary.
+Nothing broader is claimed for either. This is a measurement study,
+not a production mixer-compilation library; `methodology.md` has the
+precise boundary.
 
 ## How to reproduce
 
@@ -265,13 +267,6 @@ All scripts are deterministic (fixed seeds); re-running reproduces the
 committed `results/` files, modulo solver and library version
 differences. Further investigations use the scripts indexed in
 `docs/repository-map.md`.
-
-## Scope
-
-Measurement methodology and results for the two questions above only —
-not a production mixer-compilation library. Question 1 covers the
-radiality constraint; question 2's circuit covers the simpler structure
-its hardness proof reduces to. Nothing broader is claimed for either.
 
 ## Repository layout
 
