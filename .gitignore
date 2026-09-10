@@ -2,3 +2,18 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# repo-organization defaults (2026-09-10): results live in ClearML / <repo>_artifacts, not git
+*.pkl
+*.csv
+*.npy
+*.npz
+*.pt
+*.ckpt
+checkpoints/
+results/
+outputs/
+data/
+.clearml
+.env
+.ipynb_checkpoints/

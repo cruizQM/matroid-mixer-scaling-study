@@ -1,0 +1,25 @@
+name: matroid-mixer-scaling-study
+line: qaoa
+status: active
+tags: [mixer, grid-reconfig]
+purpose: >
+  A feasibility-preserving QAOA mixer for distribution-grid reconfiguration (radiality = spanning
+  tree, moves = matroid basis exchanges) and a provably NP-hard family of the same problem.
+  Question 1 makes the mixer cheap enough for fault-tolerant (Tier 1) and 500-CX NISQ (Tier 2)
+  budgets on real published grids; question 2 exhibits an instance where every classical route
+  tried fails. Evidence repo for the E.ON track; PUBLIC on GitHub.
+entrypoints:
+  - pip install -r requirements.txt  # uses a plain venv, not uv  # TODO: migrate to uv?
+  - python scripts/verify_correctness.py && python scripts/verify_leakage_trace.py
+  - python scripts/run_real_networks_hierarchical.py
+  - python scripts/verify_partition_mixer.py
+depends_on:
+  - qiskit  # via requirements.txt
+key_results:
+  - Mixer made cheap enough at two tiers; Tier 2 meets a 500-CX budget on every instance tested, validated on real published grids.
+  - Real tie switches are long-range by design (33-45% of network diameter), which is the expensive case for witness conditioning.
+  - Cycle-basis cost surrogate is exact where cycles are disjoint and fails measurably on IEEE33 where real ties overlap.
+  - Provably NP-hard (3-PARTITION) instance at 75 qubits where every classical route tried fails at large B; no QAOA advantage is claimed.
+use_when: You need the constraint-preserving matroid basis-exchange QAOA mixer (Qiskit reference) or the grid-reconfiguration hardness case study.
+last_reviewed: 2026-09-10
+# NOTE: branch hard-instance-partition-gadget is local-only (merged into main 2026-09-07).
