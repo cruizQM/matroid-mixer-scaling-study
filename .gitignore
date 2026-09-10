@@ -11,7 +11,10 @@ __pycache__/
 *.pt
 *.ckpt
 checkpoints/
-results/
+**/results/**
+!**/results/**/
+!**/results/**/*.md
+!**/results/**/*.png
 outputs/
 data/
 .clearml
